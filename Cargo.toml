@@ -9,6 +9,8 @@ edition = "2021"
 # Need to use git right now, because GlobalShortcuts only work from 0.9.0+
 ashpd = { version = "0.9.0", git = "https://github.com/bilelmoussaoui/ashpd.git", features = ["gtk4_wayland", "wayland"] }
 async-channel = "2.3.1"
+clap = { version = "4.5.7", features = ["derive"] }
+color-eyre = "0.6.3"
 evdev = { version = "0.12.2", features = ["tokio"] }
 gdk = { version = "0.8.2", package = "gdk4", features = ["v4_14"] }
 gdk-wayland = { version = "0.8.2", package = "gdk4-wayland", features = ["wayland_crate", "v4_12"] }

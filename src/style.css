@@ -1,15 +1,21 @@
 window {
-	background-color: transparent;
+	/*background-color: transparent;*/
+	background-color: alpha(#ff0000, 0.2);
 }
 
-.live-text {
-	color: #e3e6eb;
-	font-size: 6rem;
+.main-box {
 	border-radius: 24px;
 	background-color: alpha(#000000, 0.8);
 	padding-bottom: 12px;
 	padding-top: 0px;
-	padding-left: 48px;
-	padding-right: 48px;
+	padding-left: 24px;
+	padding-right: 24px;
 	border: 4px solid alpha(#000000, 0.4);
+}
+
+.transcribed-text {
+	color: #e3e6eb;
+	font-size: 6rem;
+	padding: 0;
+	margin: 0;
 }

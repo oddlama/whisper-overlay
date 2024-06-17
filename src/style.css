@@ -1,6 +1,5 @@
 window {
-	/*background-color: transparent;*/
-	background-color: alpha(#ff0000, 0.2);
+	background-color: transparent;
 }
 
 .main-box {
@@ -16,6 +15,4 @@ window {
 .transcribed-text {
 	color: #e3e6eb;
 	font-size: 6rem;
-	padding: 0;
-	margin: 0;
 }

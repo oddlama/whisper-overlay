@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use color_eyre::eyre::bail;
 use color_eyre::eyre::Result;
 use gdk::glib::ExitCode;
@@ -86,8 +88,8 @@ fn build_ui(app: &Application) {
         .resizable(false)
         .can_target(false)
         .focusable(false)
-        .default_width(1600) // Fixed when using layer-shell
-        .default_height(300) // Fixed when using layer-shell
+        .default_width(1600)
+        .default_height(0)
         .child(&main_box)
         .build();
 
@@ -131,6 +133,8 @@ fn build_ui(app: &Application) {
                     //window.set_visible(false);
                 }
                 UiAction::ShowWindow => {
+                    //window.set_visible(true);
+
                     let label = Label::builder()
                         .wrap(true)
                         .wrap_mode(gdk::pango::WrapMode::WordChar)
@@ -147,7 +151,11 @@ fn build_ui(app: &Application) {
 
                     main_box.append(&label);
 
-                    //window.set_visible(true);
+                    let label = label.clone();
+                    let main_box = main_box.clone();
+                    gtk::glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                        main_box.remove(&label);
+                    });
                 }
             }
         }

@@ -3,10 +3,16 @@ use std::path::PathBuf;
 use evdev::{Device, InputEventKind, Key};
 use gtk::glib;
 
-use crate::{app::Message, runtime};
+use crate::runtime;
+
+#[derive(Debug)]
+pub enum HotkeyEvent {
+    Pressed,
+    Released,
+}
 
 pub async fn evdev_listen_device(
-    sender: async_channel::Sender<Message>,
+    sender: async_channel::Sender<HotkeyEvent>,
     path: PathBuf,
     device: Device,
 ) {
@@ -32,16 +38,15 @@ pub async fn evdev_listen_device(
 
         if let InputEventKind::Key(Key::KEY_RIGHTCTRL) = ev.kind() {
             if ev.value() == 0 {
-                sender
-                    .send(Message::AddText("Hi!".to_string()))
-                    .await
-                    .expect("The channel needs to be open.");
+                let _ = sender.send(HotkeyEvent::Released).await;
+            } else if ev.value() == 1 {
+                let _ = sender.send(HotkeyEvent::Pressed).await;
             }
         }
     }
 }
 
-pub async fn evdev_listen(sender: async_channel::Sender<Message>) {
+pub async fn register(sender: async_channel::Sender<HotkeyEvent>) {
     evdev::enumerate()
         .filter(|(_, device)| {
             device

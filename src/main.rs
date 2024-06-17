@@ -70,7 +70,9 @@ async fn main_stream(connection_opts: &ConnectionOpts) -> Result<()> {
 
     runtime().spawn(async move {
         while let Some(data) = rx.recv().await {
-            socket_write.write_all(&data).await.unwrap();
+            if let Err(_) = socket_write.write_all(&data).await {
+                return;
+            }
         }
     });
 

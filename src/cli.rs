@@ -33,7 +33,7 @@ pub enum Command {
         input: Option<String>,
 
         /// Specifies the hotkey to activate voice input.
-        #[arg(short, long, default_value=None)]
+        #[arg(long, default_value=None)]
         hotkey: Option<String>,
     },
     Load {

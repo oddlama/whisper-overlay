@@ -24,7 +24,7 @@
       };
     in {
       packages.default = pkgs.rustPlatform.buildRustPackage {
-        pname = "whisper-streaming-overlay";
+        pname = "whisper-overlay";
         version = "1.0.0";
         src = ./.;
         nativeBuildInputs = [
@@ -47,7 +47,7 @@
 
       # `nix develop`
       devShells.default = pkgs.devshell.mkShell {
-        name = "whisper-streaming-overlay";
+        name = "whisper-overlay";
         imports = [
           "${devshell}/extra/language/c.nix"
           "${devshell}/extra/language/rust.nix"

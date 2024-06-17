@@ -1,5 +1,5 @@
 [package]
-name = "whisper-streaming-overlay"
+name = "whisper-overlay"
 version = "1.0.0"
 edition = "2021"
 authors = ["oddlama <oddlama@oddlama.org>"]

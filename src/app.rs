@@ -9,14 +9,32 @@ use gtk::{glib, Application, ApplicationWindow, Label};
 use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
 
+use crate::hotkeys::HotkeyEvent;
 use crate::runtime;
-use crate::hotkeys::evdev_listen;
 
-const APP_ID: &str = "org.oddlama.whisper-streaming-overlay";
+const APP_ID: &str = "org.oddlama.whisper-overlay";
 
 #[derive(Debug)]
-pub enum Message {
+pub enum UiAction {
     AddText(String),
+    HideWindow,
+    ShowWindow,
+}
+
+async fn handle_hotkey(
+    hotkey_receiver: async_channel::Receiver<HotkeyEvent>,
+    ui_sender: async_channel::Sender<UiAction>,
+) {
+    while let Ok(event) = hotkey_receiver.recv().await {
+        match event {
+            HotkeyEvent::Pressed => {
+                ui_sender.send(UiAction::ShowWindow).await.unwrap();
+            }
+            HotkeyEvent::Released => {
+                ui_sender.send(UiAction::HideWindow).await.unwrap();
+            }
+        }
+    }
 }
 
 pub fn launch_app() -> Result<()> {
@@ -30,10 +48,7 @@ pub fn launch_app() -> Result<()> {
     // Run the application
     let exit_code = app.run_with_args::<&str>(&[]);
     if exit_code != ExitCode::SUCCESS {
-        bail!(
-            "Could not launch gtk application: {:?}",
-            exit_code
-        );
+        bail!("Could not launch gtk application: {:?}", exit_code);
     };
 
     Ok(())
@@ -76,26 +91,38 @@ fn build_ui(app: &Application) {
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_keyboard_mode(gtk_layer_shell::KeyboardMode::None);
-    window.set_namespace("whisper-streaming-overlay");
+    window.set_namespace("whisper-overlay");
 
     window.connect_realize(|window| {
         let wayland_surface = window.surface().and_downcast::<WaylandSurface>().unwrap();
         wayland_surface.set_input_region(&Region::create_rectangle(&RectangleInt::new(0, 0, 0, 0)));
     });
 
-    // Initialize tokio runtime and spawn evdev thread
-    let (sender, receiver) = async_channel::bounded(64);
-    runtime().spawn(glib::clone!(@strong sender => async move { evdev_listen(sender).await; }));
+    //window.set_monitor();
+    window.present();
+
+    // Spawn hotkey detector
+    let (hotkey_sender, hotkey_receiver) = async_channel::bounded(64);
+    runtime().spawn(glib::clone!(@strong hotkey_sender => async move {
+        crate::hotkeys::register(hotkey_sender).await;
+    }));
+
+    // Spawn hotkey processor
+    let (ui_sender, ui_receiver) = async_channel::bounded(64);
+    runtime().spawn(
+        glib::clone!(@strong hotkey_receiver, @strong ui_sender => async move {
+            handle_hotkey(hotkey_receiver, ui_sender).await;
+        }),
+    );
 
     glib::spawn_future_local(async move {
-        while let Ok(response) = receiver.recv().await {
-            println!("Got message {:#?}", response);
-            match response {
-                Message::AddText(text) => label.set_text(&format!("{}{}", label.text(), text)),
+        while let Ok(ui_action) = ui_receiver.recv().await {
+            println!("Got ui action {:#?}", ui_action);
+            match ui_action {
+                UiAction::AddText(text) => label.set_text(&format!("{}{}", label.text(), text)),
+                UiAction::HideWindow => {}
+                UiAction::ShowWindow => {}
             }
         }
     });
-
-    //window.set_monitor();
-    window.present();
 }

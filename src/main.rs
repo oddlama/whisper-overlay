@@ -1,52 +1,23 @@
+use crate::cli::ConnectionOpts;
+use crate::util::{recv_message, send_message};
 use clap::Parser;
-use cli::ConnectionOpts;
 use color_eyre::eyre::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use serde::Deserialize;
 use serde_json::json;
 use std::sync::OnceLock;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
 
 mod app;
 mod cli;
 mod shortcuts;
+mod util;
+mod waybar;
 
 pub fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| Runtime::new().expect("Setting up tokio runtime needs to succeed."))
-}
-
-async fn send_message<S: AsyncWriteExt + std::marker::Unpin>(
-    socket: &mut S,
-    value: serde_json::Value,
-) -> Result<()> {
-    let json_str = value.to_string();
-    let data = json_str.as_bytes();
-    let message_length = (data.len() as u32).to_be_bytes();
-
-    socket.write_all(&message_length).await?;
-    socket.write_all(data).await?;
-    socket.flush().await?;
-
-    Ok(())
-}
-
-async fn recv_message<S: AsyncReadExt + std::marker::Unpin>(
-    socket: &mut S,
-) -> Result<serde_json::Value> {
-    let mut length_buf = [0u8; 4];
-    socket.read_exact(&mut length_buf).await?;
-
-    let message_length = u32::from_be_bytes(length_buf) as usize;
-    let mut data_buf = vec![0u8; message_length];
-    socket.read_exact(&mut data_buf).await?;
-
-    let json_str = String::from_utf8(data_buf)?;
-    let value = serde_json::from_str(&json_str)?;
-    Ok(value)
 }
 
 async fn main_action(action: &str, connection_opts: &ConnectionOpts) -> Result<()> {
@@ -109,97 +80,14 @@ async fn main_stream(connection_opts: &ConnectionOpts) -> Result<()> {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct StatusMessage {
-    state: String,
-    clients: u32,
-    waiting: u32,
-}
-
-async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> {
-    let status_offline = json!({
-        "text": "",
-        "alt": "none",
-        "tooltip": format!("Server offline ({})", connection_opts.address),
-        "class": "disconnected",
-        "state": "unloaded",
-        "clients": 0,
-        "waiting": 0,
-    });
-
-    let mut last_status = json!({});
-    let mut update_status = |s: serde_json::Value| {
-        if last_status != s {
-            println!("{}", s.to_string());
-            last_status = s;
-        }
-    };
-
-    'outer: loop {
-        let mut socket = match TcpStream::connect(&connection_opts.address).await {
-            Ok(socket) => socket,
-            Err(e) => {
-                eprintln!("error: {e}");
-                update_status(status_offline.clone());
-                // FIXME: make this a setting
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
-
-        if let Err(e) = send_message(&mut socket, json!({"mode": "status"})).await {
-            eprintln!("error: {e}");
-            update_status(status_offline.clone());
-            // FIXME: make this a setting
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
-        }
-
-        loop {
-            let message = match recv_message(&mut socket).await {
-                Ok(value) => value,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    update_status(status_offline.clone());
-                    // FIXME: make this a setting
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    continue 'outer;
-                }
-            };
-
-            let message: StatusMessage = match serde_json::from_value(message) {
-                Ok(value) => value,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    update_status(status_offline.clone());
-                    // FIXME: make this a setting
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    continue 'outer;
-                }
-            };
-
-            let status = json!({
-                "text": "",
-                "alt": "none",
-                "tooltip": format!("Connected ({})", connection_opts.address),
-                "class": format!("connected-{}{}", message.state, (if message.waiting < message.clients { "-active" } else { "" })),
-                "state": message.state,
-                "clients": message.clients,
-                "waiting": message.waiting,
-            });
-
-            update_status(status);
-        }
-    }
-}
-
 fn main() -> Result<()> {
     color_eyre::install()?;
     let args = cli::Cli::parse();
 
     match args.command {
         cli::Command::WaybarStatus { connection_opts } => {
-            runtime().block_on(async move { main_waybar_status(&connection_opts).await })?;
+            runtime()
+                .block_on(async move { waybar::main_waybar_status(&connection_opts).await })?;
         }
         cli::Command::Overlay { connection_opts: _ } => {
             app::launch_app()?;

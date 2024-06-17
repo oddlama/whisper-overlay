@@ -2,12 +2,11 @@
 name = "whisper-streaming-overlay"
 version = "1.0.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["oddlama <oddlama@oddlama.org>"]
+description = "A wayland overlay providing a hotkey for live speech-to-text input via faster-whisper"
+license = "MIT"
 
 [dependencies]
-# Need to use git right now, because GlobalShortcuts only work from 0.9.0+
-ashpd = { version = "0.9.0", git = "https://github.com/bilelmoussaoui/ashpd.git", features = ["gtk4_wayland", "wayland"] }
 async-channel = "2.3.1"
 bytemuck = "1.16.0"
 clap = { version = "4.5.7", features = ["derive"] }
@@ -21,6 +20,3 @@ gtk-layer-shell = { version = "0.3.0", package = "gtk4-layer-shell" }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 tokio = { version = "1.38.0", features = ["rt-multi-thread", "io-util", "sync", "time"] }
-#wayland-backend = { version = "0.3.4", features = ["client_system"] }
-#wayland-client = "0.31.3"
-#wayland-protocols = { version = "0.32.1", features = ["unstable", "client"] }

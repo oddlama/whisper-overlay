@@ -10,7 +10,7 @@ use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
 
 use crate::runtime;
-use crate::shortcuts::evdev_listen;
+use crate::hotkeys::evdev_listen;
 
 const APP_ID: &str = "org.oddlama.whisper-streaming-overlay";
 

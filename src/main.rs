@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 
 mod app;
 mod cli;
-mod shortcuts;
+mod hotkeys;
 mod util;
 mod waybar;
 
@@ -89,7 +89,13 @@ fn main() -> Result<()> {
             runtime()
                 .block_on(async move { waybar::main_waybar_status(&connection_opts).await })?;
         }
-        cli::Command::Overlay { connection_opts: _ } => {
+        cli::Command::Overlay {
+            connection_opts: _,
+            style,
+            monitor,
+            input,
+            hotkey,
+        } => {
             app::launch_app()?;
         }
         cli::Command::Load { connection_opts } => {

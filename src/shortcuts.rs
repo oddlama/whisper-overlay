@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use evdev::{Device, InputEventKind, Key};
 use gtk::glib;
 
-use crate::app::{runtime, Message};
+use crate::{app::Message, runtime};
 
 pub async fn evdev_listen_device(
     sender: async_channel::Sender<Message>,

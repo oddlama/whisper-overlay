@@ -84,6 +84,7 @@
           pkgs.gdk-pixbuf
           pkgs.harfbuzz
           pkgs.vulkan-loader
+          pkgs.alsa-lib
         ];
 
         env = [

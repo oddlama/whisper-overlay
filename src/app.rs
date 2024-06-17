@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use color_eyre::eyre::bail;
 use color_eyre::eyre::Result;
 use gdk::glib::ExitCode;
@@ -10,16 +8,11 @@ use gtk::gdk::Display;
 use gtk::{glib, Application, ApplicationWindow, Label};
 use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
-use tokio::runtime::Runtime;
 
+use crate::runtime;
 use crate::shortcuts::evdev_listen;
 
 const APP_ID: &str = "org.oddlama.whisper-streaming-overlay";
-
-pub fn runtime() -> &'static Runtime {
-    static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| Runtime::new().expect("Setting up tokio runtime needs to succeed."))
-}
 
 #[derive(Debug)]
 pub enum Message {

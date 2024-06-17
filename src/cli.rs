@@ -3,17 +3,27 @@ use clap::{Parser, Subcommand, Args};
 #[command(version, about)]
 pub struct Cli {
     #[clap(subcommand)]
-    command: Command,
+    pub command: Command,
 }
 
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Status {
+    WaybarStatus {
+        #[clap(flatten)]
+        connection_opts: ConnectionOpts,
+    },
+    Overlay {
+        #[clap(flatten)]
+        connection_opts: ConnectionOpts,
     },
     Load {
+        #[clap(flatten)]
+        connection_opts: ConnectionOpts,
     },
     Unload {
+        #[clap(flatten)]
+        connection_opts: ConnectionOpts,
     },
     Stream {
         #[clap(flatten)]
@@ -23,11 +33,7 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct ConnectionOpts {
-    /// The host of the whisper streaming instance
+    /// The address of the the whisper streaming instance (host:port)
     #[clap(long)]
-    pub host: String,
-
-    /// The port of the whisper streaming instance
-    #[clap(long)]
-    pub port: u16,
+    pub address: String,
 }

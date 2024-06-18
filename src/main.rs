@@ -1,11 +1,9 @@
 use crate::cli::ConnectionOpts;
-use crate::util::{recv_message, send_message};
+use crate::util::{send_message};
 use clap::Parser;
 use color_eyre::eyre::Result;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde_json::json;
 use std::sync::OnceLock;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
 

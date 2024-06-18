@@ -14,7 +14,6 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::TcpStream;
@@ -26,6 +25,7 @@ use crate::cli::ConnectionOpts;
 use crate::hotkeys::HotkeyEvent;
 use crate::runtime;
 use crate::util::recv_message;
+use crate::util::send_audio_data;
 use crate::util::send_message;
 
 const APP_ID: &str = "org.oddlama.whisper-overlay";
@@ -75,182 +75,242 @@ async fn connect_whisper(
     Ok((socket_read, socket_write))
 }
 
+async fn set_disconnect_status(ui_sender: &mpsc::Sender<UiAction>, message: &serde_json::Value) {
+    let text = if let Some(status) = message.get("status").and_then(|x| x.as_str()) {
+        status.to_string()
+    } else {
+        message.to_string()
+    };
+    ui_sender
+        .send(UiAction::Disconnected(Some(text)))
+        .await
+        .unwrap();
+}
+
 async fn handle_connection(
     mut connection_receiver: watch::Receiver<ConnectionState>,
     ui_sender: mpsc::Sender<UiAction>,
     connection_opts: ConnectionOpts,
 ) {
     ui_sender.send(UiAction::Disconnected(None)).await.unwrap();
-    loop {
-        if connection_receiver.changed().await.is_err() {
-            break;
-        }
 
-        // Wait until we should connect
-        let desired_state = *connection_receiver.borrow_and_update();
-        match desired_state {
-            ConnectionState::Connected => {
-                ui_sender.send(UiAction::ShowWindow).await.unwrap();
-            }
-            ConnectionState::Disconnected => {
-                ui_sender.send(UiAction::HideWindow).await.unwrap();
-                continue;
-            }
-        }
+    let bytes = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let bytes_2 = bytes.clone();
+    let (audio_tx, mut audio_rx) = watch::channel(());
+    let (audio_shutdown_tx, audio_shutdown_rx) = std::sync::mpsc::channel();
+    let audio_active = Arc::new(Mutex::new(false));
+    let audio_active_2 = audio_active.clone();
 
-        ui_sender.send(UiAction::Connecting).await.unwrap();
-        let (mut socket_read, mut socket_write) = match connect_whisper(&connection_opts).await {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Failed to connect to {}: {}", connection_opts.address, e);
-                ui_sender
-                    .send(UiAction::Disconnected(Some(e.to_string())))
-                    .await
-                    .unwrap();
-                continue;
-            }
+    let audio_thread = std::thread::spawn(move || {
+        let host = cpal::default_host();
+        let device = host
+            .default_input_device()
+            .expect("No input device available");
+
+        println!("Input device: {}", device.name().unwrap());
+
+        let config = cpal::StreamConfig {
+            channels: 1,
+            sample_rate: cpal::SampleRate(16000),
+            buffer_size: cpal::BufferSize::Default,
         };
 
-        match recv_message(&mut socket_read).await {
-            Ok(message) => {
-                if message.get("status") != Some(&json!("waiting for lock")) {
-                    eprintln!(
-                        "error: received unexpected message: {}",
-                        message
-                    );
+        let err_fn = move |err| {
+            eprintln!("an error occurred on the audio stream: {}", err);
+        };
+
+        let stream = device
+            .build_input_stream(
+                &config,
+                move |data: &[i16], _: &_| {
+                    if !*audio_active_2.lock().expect("Could not lock audio stop") {
+                        // BUG: https://github.com/RustAudio/cpal/issues/771
+                        return;
+                    }
+                    bytes_2
+                        .lock()
+                        .expect("Could not lock mutex to write audio data")
+                        .extend_from_slice(bytemuck::cast_slice(data));
+                    let _ = audio_tx.send(());
+                },
+                err_fn,
+                None,
+            )
+            .expect("Failed to build audio input stream");
+
+        stream.play().expect("Failed to start audio stream");
+        let _ = audio_shutdown_rx.recv();
+    });
+
+    loop {
+        {
+            if connection_receiver.changed().await.is_err() {
+                break;
+            }
+
+            // Wait until we should connect
+            let desired_state = *connection_receiver.borrow_and_update();
+            match desired_state {
+                ConnectionState::Connected => {
+                    ui_sender.send(UiAction::ShowWindow).await.unwrap();
+                }
+                ConnectionState::Disconnected => {
+                    ui_sender.send(UiAction::HideWindow).await.unwrap();
+                    continue;
+                }
+            }
+
+            ui_sender.send(UiAction::Connecting).await.unwrap();
+            let (mut socket_read, mut socket_write) = match connect_whisper(&connection_opts).await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Failed to connect to {}: {}", connection_opts.address, e);
                     ui_sender
-                        .send(UiAction::Disconnected(Some(message.to_string())))
+                        .send(UiAction::Disconnected(Some(e.to_string())))
+                        .await
+                        .unwrap();
+                    continue;
+                }
+            };
+
+            match recv_message(&mut socket_read).await {
+                Ok(message) => {
+                    if message.get("status") != Some(&json!("waiting for lock")) {
+                        eprintln!("error: received unexpected message: {}", message);
+                        set_disconnect_status(&ui_sender, &message).await;
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("could not receive message from socket: {}", e);
+                    ui_sender
+                        .send(UiAction::Disconnected(Some(e.to_string())))
                         .await
                         .unwrap();
                     continue;
                 }
             }
-            Err(e) => {
-                eprintln!("could not receive message from socket: {}", e);
-                ui_sender
-                    .send(UiAction::Disconnected(Some(e.to_string())))
-                    .await
-                    .unwrap();
-                continue;
-            }
-        }
 
-        ui_sender.send(UiAction::Locking).await.unwrap();
+            ui_sender.send(UiAction::Locking).await.unwrap();
 
-        match recv_message(&mut socket_read).await {
-            Ok(message) => {
-                if message.get("status") != Some(&json!("lock acquired")) {
-                    eprintln!(
-                        "error: received unexpected message: {}",
-                        message
-                    );
+            match recv_message(&mut socket_read).await {
+                Ok(message) => {
+                    if message.get("status") != Some(&json!("lock acquired")) {
+                        eprintln!("error: received unexpected message: {}", message);
+                        set_disconnect_status(&ui_sender, &message).await;
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("could not receive message from socket: {}", e);
                     ui_sender
-                        .send(UiAction::Disconnected(Some(message.to_string())))
+                        .send(UiAction::Disconnected(Some(e.to_string())))
                         .await
                         .unwrap();
                     continue;
                 }
             }
-            Err(e) => {
-                eprintln!("could not receive message from socket: {}", e);
-                ui_sender
-                    .send(UiAction::Disconnected(Some(e.to_string())))
-                    .await
-                    .unwrap();
-                continue;
-            }
-        }
 
-        ui_sender.send(UiAction::Connected).await.unwrap();
+            ui_sender.send(UiAction::Connected).await.unwrap();
 
-        let (audio_tx, mut audio_rx) = watch::channel(());
-        let (audio_shutdown_tx, audio_shutdown_rx) = std::sync::mpsc::channel();
+            let (shutdown_tx, mut shutdown_rx) = watch::channel(());
+            // Start audio thread
+            *audio_active.lock().expect("Could not lock audio stop") = true;
 
-        let bytes = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let bytes_2 = bytes.clone();
+            loop {
+                tokio::select! {
+                    message = recv_message(&mut socket_read) => {
+                        match message {
+                            Ok(message) => {
+                                if message.get("status") == Some(&json!("flushed")) {
+                                    println!("Server has flushed, signalling shutdown");
+                                    let _ = shutdown_tx.send(());
+                                } else if message.get("tokens").is_some() {
+                                    ui_sender.send(UiAction::ModelResult(message)).await.unwrap();
+                                } else {
+                                    eprintln!("ignoring unsolicited message: {}", message.to_string());
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("could not receive message from socket: {}", e);
+                                ui_sender
+                                    .send(UiAction::Disconnected(Some(e.to_string())))
+                                    .await
+                                    .unwrap();
+                                break;
+                            },
+                        }
+                    }
+                    _ = shutdown_rx.changed() => {
+                        println!("Ready to disconnect.");
+                        // Processing is finished
+                        shutdown_rx.mark_unchanged(); // Mark state seen
+                        ui_sender.send(UiAction::Disconnected(None)).await.unwrap();
+                        break;
+                    }
+                    _ = audio_rx.changed() => {
+                        audio_rx.mark_unchanged(); // Mark state seen
+                        let data = std::mem::take(&mut *bytes.lock().expect("Could not lock mutex to read audio data"));
 
-        let audio_thread = std::thread::spawn(move || {
-            let host = cpal::default_host();
-            let device = host
-                .default_input_device()
-                .expect("No input device available");
-
-            println!("Input device: {}", device.name().unwrap());
-
-            let config = cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(16000),
-                buffer_size: cpal::BufferSize::Default,
-            };
-
-            let err_fn = move |err| {
-                eprintln!("an error occurred on the audio stream: {}", err);
-            };
-
-            let stream = device
-                .build_input_stream(
-                    &config,
-                    move |data: &[i16], _: &_| {
-                        bytes_2
-                            .lock()
-                            .expect("Could not lock mutex to write audio data")
-                            .extend_from_slice(bytemuck::cast_slice(data));
-                        let _ = audio_tx.send(());
-                    },
-                    err_fn,
-                    None,
-                )
-                .expect("Failed to build audio input stream");
-
-            stream.play().expect("Failed to start audio stream");
-            let _ = audio_shutdown_rx.recv();
-        });
-
-        loop {
-            tokio::select! {
-                message = recv_message(&mut socket_read) => {
-                    match message {
-                        Ok(message) => {
-                            println!("{}", message);
-                            ui_sender.send(UiAction::ModelResult(message)).await.unwrap();
-                        },
-                        Err(e) => {
-                            eprintln!("could not receive message from socket: {}", e);
+                        if let Err(e) = send_audio_data(&mut socket_write, &data).await {
+                            eprintln!("could not write audio data to socket: {}", e);
                             ui_sender
                                 .send(UiAction::Disconnected(Some(e.to_string())))
                                 .await
                                 .unwrap();
                             break;
-                        },
+                        }
                     }
-                }
-                _ = audio_rx.changed() => {
-                    audio_rx.mark_unchanged();
-                    let data = std::mem::take(&mut *bytes.lock().expect("Could not lock mutex to read audio data"));
-                    if let Err(e) = socket_write.write_all(&data).await {
-                        eprintln!("could not write audio to socket: {}", e);
-                        ui_sender
-                            .send(UiAction::Disconnected(Some(e.to_string())))
-                            .await
-                            .unwrap();
-                        break;
+                    _ = connection_receiver.changed() => {
+                        // Wait until we should disconnect
+                        if *connection_receiver.borrow_and_update() == ConnectionState::Disconnected {
+                            println!("Done, notifying server to finish...");
+                            // Pause audio thread
+                            *audio_active.lock().expect("Could not lock audio stop") = false;
+
+                            // Don't disconnect immediately, instead instruct the server to flush
+                            if let Err(e) = send_message(&mut socket_write, json!({"action": "flush"})).await {
+                                eprintln!("could not send flush action to socket: {}", e);
+                                ui_sender
+                                    .send(UiAction::Disconnected(Some(e.to_string())))
+                                    .await
+                                    .unwrap();
+                                break;
+                            }
+
+                            // If the server fails to respond within 1 second, we will force-kill.
+                            let shutdown_tx_2 = shutdown_tx.clone();
+                            runtime().spawn(async move {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                println!("Server has not responded to flush, forcing disconnect now.");
+                                let _ = shutdown_tx_2.send(());
+                            });
+                        }
                     }
-                }
-                _ = connection_receiver.changed() => {
-                    // Wait until we should disconnect
-                    if *connection_receiver.borrow_and_update() == ConnectionState::Disconnected {
-                        ui_sender.send(UiAction::HideWindow).await.unwrap();
-                        break;
-                    }
-                }
-            };
+                };
+            }
+
+            println!("Disconnecting.");
         }
 
-        let _ = audio_shutdown_tx.send(());
-        audio_thread.join().expect("Could not join audio_thread");
+        // Keep the window open for another 4 seconds if no other event takes priority
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(4000)) => {
+                ui_sender.send(UiAction::HideWindow).await.unwrap();
+            },
+            _ = connection_receiver.changed() => {
+                connection_receiver.mark_changed();
+                // Early break so the request can be prioritized
+            }
+        };
 
-        ui_sender.send(UiAction::Disconnected(None)).await.unwrap();
+        println!("Waiting for next connection request");
     }
+
+    // Stop and join audio thread
+    let _ = audio_shutdown_tx.send(());
+    audio_thread.join().expect("Could not join audio_thread");
 }
 
 async fn handle_hotkey(
@@ -360,9 +420,7 @@ fn build_ui(app: &Application, opts: Command) {
     window.connect_realize(|window| {
         let wayland_surface = window.surface().and_downcast::<WaylandSurface>().unwrap();
         wayland_surface.set_input_region(&Region::create_rectangle(&RectangleInt::new(0, 0, 0, 0)));
-
-        // FIXME: disabled temporarily
-        // window.set_visible(false);
+        window.set_visible(false);
     });
 
     //window.set_monitor();
@@ -457,13 +515,21 @@ fn build_ui(app: &Application, opts: Command) {
                     }
                 }
                 UiAction::HideWindow => {
-                    //window.set_visible(false);
+                    window.set_visible(false);
+                    window.queue_draw();
                     while let Some(c) = lines_box.last_child() {
                         lines_box.remove(&c);
                     }
                 }
                 UiAction::ShowWindow => {
-                    //window.set_visible(true);
+                    // Just don't ask, this is not an oversight!
+                    // If the window is not toggled, on, off, on, it won't show the first time.
+                    // This is somehow related to hiding the window in connect_realize.
+                    window.set_visible(true);
+                    window.set_visible(false);
+                    window.set_visible(true);
+                    window.queue_draw();
+                    status_label.queue_draw();
                 }
                 UiAction::Disconnected(reason) => {
                     let mut message = "<span color='gray'></span> Disconnected".to_string();
@@ -471,15 +537,19 @@ fn build_ui(app: &Application, opts: Command) {
                         message += &format!(" <span color='gray'>{}</span>", reason);
                     }
                     status_label.set_markup(&message);
+                    status_label.queue_draw();
                 }
                 UiAction::Connecting => {
                     status_label.set_markup("<span color='yellow'></span> Connecting");
+                    status_label.queue_draw();
                 }
                 UiAction::Locking => {
                     status_label.set_markup("<span color='orange'></span> Waiting for model lock");
+                    status_label.queue_draw();
                 }
                 UiAction::Connected => {
                     status_label.set_markup("<span color='#4ab0fa'></span> Connected");
+                    status_label.queue_draw();
                 }
             }
         }

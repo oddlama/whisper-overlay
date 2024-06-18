@@ -16,6 +16,20 @@ pub async fn send_message<S: AsyncWriteExt + std::marker::Unpin>(
     Ok(())
 }
 
+pub async fn send_audio_data<S: AsyncWriteExt + std::marker::Unpin>(
+    socket: &mut S,
+    data: &[u8],
+) -> Result<()> {
+    if !data.is_empty() {
+        let message_length = (data.len() as u32 | 0x80000000).to_be_bytes();
+        socket.write_all(&message_length).await?;
+        socket.write_all(data).await?;
+        socket.flush().await?;
+    }
+
+    Ok(())
+}
+
 pub async fn recv_message<S: AsyncReadExt + std::marker::Unpin>(
     socket: &mut S,
 ) -> Result<serde_json::Value> {

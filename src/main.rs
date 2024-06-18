@@ -57,10 +57,7 @@ async fn main_stream(connection_opts: &ConnectionOpts) -> Result<()> {
     let stream = device.build_input_stream(
         &config.into(),
         move |data: &[i16], _: &_| {
-            let tx = tx.clone();
-            runtime().block_on(async move {
-                tx.send(bytemuck::cast_slice(data).to_vec()).await.unwrap();
-            });
+            let _ = tx.blocking_send(bytemuck::cast_slice(data).to_vec());
         },
         err_fn,
         None,
@@ -91,14 +88,8 @@ fn main() -> Result<()> {
             runtime()
                 .block_on(async move { waybar::main_waybar_status(&connection_opts).await })?;
         }
-        cli::Command::Overlay {
-            connection_opts: _,
-            style,
-            monitor,
-            input,
-            hotkey,
-        } => {
-            app::launch_app()?;
+        command @ cli::Command::Overlay { .. } => {
+            app::launch_app(command)?;
         }
         cli::Command::Load { connection_opts } => {
             runtime().block_on(async move { main_action("load", &connection_opts).await })?;

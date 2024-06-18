@@ -9,7 +9,7 @@ pub struct Cli {
 }
 
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 pub enum Command {
     WaybarStatus {
         #[clap(flatten)]
@@ -50,7 +50,7 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 pub struct ConnectionOpts {
     /// The address of the the whisper streaming instance (host:port)
     #[clap(short, long)]

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use evdev::{Device, InputEventKind, Key};
 use gtk::glib;
+use tokio::sync::mpsc;
 
 use crate::runtime;
 
@@ -11,11 +12,7 @@ pub enum HotkeyEvent {
     Released,
 }
 
-pub async fn evdev_listen_device(
-    sender: async_channel::Sender<HotkeyEvent>,
-    path: PathBuf,
-    device: Device,
-) {
+pub async fn evdev_listen_device(sender: mpsc::Sender<HotkeyEvent>, path: PathBuf, device: Device) {
     let name = device.name().unwrap_or("Unnamed device");
     let name = format!("{} ({})", name, path.display());
 
@@ -46,7 +43,7 @@ pub async fn evdev_listen_device(
     }
 }
 
-pub async fn register(sender: async_channel::Sender<HotkeyEvent>) {
+pub async fn register(sender: mpsc::Sender<HotkeyEvent>) {
     evdev::enumerate()
         .filter(|(_, device)| {
             device

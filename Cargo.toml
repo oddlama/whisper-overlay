@@ -19,4 +19,4 @@ gtk = { version = "0.8.2", package = "gtk4", features = ["v4_14"] }
 gtk-layer-shell = { version = "0.3.0", package = "gtk4-layer-shell" }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
-tokio = { version = "1.38.0", features = ["rt-multi-thread", "io-util", "sync", "time"] }
+tokio = { version = "1.38.0", features = ["rt-multi-thread", "io-util", "sync", "time", "macros", "full"] }

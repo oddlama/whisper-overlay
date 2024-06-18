@@ -1,13 +1,12 @@
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, Args};
 #[derive(Parser)]
 #[command(version, about)]
 pub struct Cli {
     #[clap(subcommand)]
     pub command: Command,
 }
-
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum Command {
@@ -41,10 +40,6 @@ pub enum Command {
         connection_opts: ConnectionOpts,
     },
     Unload {
-        #[clap(flatten)]
-        connection_opts: ConnectionOpts,
-    },
-    Stream {
         #[clap(flatten)]
         connection_opts: ConnectionOpts,
     },

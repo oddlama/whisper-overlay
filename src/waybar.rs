@@ -27,7 +27,7 @@ pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> 
     let mut last_status = json!({});
     let mut update_status = |s: serde_json::Value| {
         if last_status != s {
-            println!("{}", s.to_string());
+            println!("{}", s);
             last_status = s;
         }
     };

@@ -29,57 +29,6 @@ async fn main_action(action: &str, connection_opts: &ConnectionOpts) -> Result<(
     Ok(())
 }
 
-async fn main_stream(connection_opts: &ConnectionOpts) -> Result<()> {
-    let (mut socket_read, mut socket_write) = TcpStream::connect(&connection_opts.address)
-        .await?
-        .into_split();
-    println!("Connected to {}", connection_opts.address);
-
-    send_message(&mut socket_write, json!({"mode": "stream"})).await?;
-
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .expect("No input device available"); // FIXME: AAAAAA
-    println!("Input device: {}", device.name()?);
-
-    let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    let err_fn = move |err| {
-        eprintln!("an error occurred on stream: {}", err);
-    };
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel(4096);
-    let stream = device.build_input_stream(
-        &config.into(),
-        move |data: &[i16], _: &_| {
-            let _ = tx.blocking_send(bytemuck::cast_slice(data).to_vec());
-        },
-        err_fn,
-        None,
-    )?;
-
-    stream.play()?;
-
-    runtime().spawn(async move {
-        while let Some(data) = rx.recv().await {
-            println!("writing {}", data.len());
-            if let Err(_) = socket_write.write_all(&data).await {
-                return;
-            }
-        }
-    });
-
-    loop {
-        let message = recv_message(&mut socket_read).await?;
-        println!("{}", message.to_string());
-    }
-}
-
 fn main() -> Result<()> {
     color_eyre::install()?;
     let args = cli::Cli::parse();
@@ -97,9 +46,6 @@ fn main() -> Result<()> {
         }
         cli::Command::Unload { connection_opts } => {
             runtime().block_on(async move { main_action("unload", &connection_opts).await })?;
-        }
-        cli::Command::Stream { connection_opts } => {
-            runtime().block_on(async move { main_stream(&connection_opts).await })?;
         }
     }
 

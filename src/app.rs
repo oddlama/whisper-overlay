@@ -116,7 +116,7 @@ async fn handle_connection(
                 if message.get("status") != Some(&json!("waiting for lock")) {
                     eprintln!(
                         "error: received unexpected message: {}",
-                        message.to_string()
+                        message
                     );
                     ui_sender
                         .send(UiAction::Disconnected(Some(message.to_string())))
@@ -142,7 +142,7 @@ async fn handle_connection(
                 if message.get("status") != Some(&json!("lock acquired")) {
                     eprintln!(
                         "error: received unexpected message: {}",
-                        message.to_string()
+                        message
                     );
                     ui_sender
                         .send(UiAction::Disconnected(Some(message.to_string())))
@@ -189,7 +189,7 @@ async fn handle_connection(
 
             let stream = device
                 .build_input_stream(
-                    &config.into(),
+                    &config,
                     move |data: &[i16], _: &_| {
                         bytes_2
                             .lock()
@@ -211,7 +211,7 @@ async fn handle_connection(
                 message = recv_message(&mut socket_read) => {
                     match message {
                         Ok(message) => {
-                            println!("{}", message.to_string());
+                            println!("{}", message);
                             ui_sender.send(UiAction::ModelResult(message)).await.unwrap();
                         },
                         Err(e) => {
@@ -429,7 +429,7 @@ fn build_ui(app: &Application, opts: Command) {
                                     "{current_markup}<span color=\"{fg}\">{text}</span>",
                                     fg = gradient.at(token.probability.into()).to_hex_string(),
                                     text = glib::markup_escape_text(if current_markup.is_empty() {
-                                        &token.word.trim()
+                                        token.word.trim()
                                     } else {
                                         &token.word
                                     })

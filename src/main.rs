@@ -67,6 +67,7 @@ async fn main_stream(connection_opts: &ConnectionOpts) -> Result<()> {
 
     runtime().spawn(async move {
         while let Some(data) = rx.recv().await {
+            println!("writing {}", data.len());
             if let Err(_) = socket_write.write_all(&data).await {
                 return;
             }

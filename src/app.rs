@@ -9,6 +9,7 @@ use gtk::gdk::Display;
 use gtk::{glib, Application, ApplicationWindow, Label};
 use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -31,18 +32,34 @@ const APP_ID: &str = "org.oddlama.whisper-overlay";
 
 #[derive(Debug)]
 pub enum UiAction {
-    AddText(String),
-    Disconnected,
-    Connected,
+    ModelResult(serde_json::Value),
+    Disconnected(Option<String>),
     Connecting,
+    Connected,
+    Locking,
     HideWindow,
     ShowWindow,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ConnectionState {
     Connected,
     Disconnected,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Token {
+    #[allow(unused)]
+    begin: f32,
+    #[allow(unused)]
+    end: f32,
+    word: String,
+    probability: f32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TokenResult {
+    tokens: Vec<Token>,
 }
 
 async fn connect_whisper(
@@ -63,15 +80,22 @@ async fn handle_connection(
     ui_sender: mpsc::Sender<UiAction>,
     connection_opts: ConnectionOpts,
 ) {
+    ui_sender.send(UiAction::Disconnected(None)).await.unwrap();
     loop {
-        ui_sender.send(UiAction::Disconnected).await.unwrap();
         if connection_receiver.changed().await.is_err() {
             break;
         }
 
         // Wait until we should connect
-        if *connection_receiver.borrow_and_update() != ConnectionState::Connected {
-            continue;
+        let desired_state = *connection_receiver.borrow_and_update();
+        match desired_state {
+            ConnectionState::Connected => {
+                ui_sender.send(UiAction::ShowWindow).await.unwrap();
+            }
+            ConnectionState::Disconnected => {
+                ui_sender.send(UiAction::HideWindow).await.unwrap();
+                continue;
+            }
         }
 
         ui_sender.send(UiAction::Connecting).await.unwrap();
@@ -79,9 +103,64 @@ async fn handle_connection(
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to connect to {}: {}", connection_opts.address, e);
+                ui_sender
+                    .send(UiAction::Disconnected(Some(e.to_string())))
+                    .await
+                    .unwrap();
                 continue;
             }
         };
+
+        match recv_message(&mut socket_read).await {
+            Ok(message) => {
+                if message.get("status") != Some(&json!("waiting for lock")) {
+                    eprintln!(
+                        "error: received unexpected message: {}",
+                        message.to_string()
+                    );
+                    ui_sender
+                        .send(UiAction::Disconnected(Some(message.to_string())))
+                        .await
+                        .unwrap();
+                    continue;
+                }
+            }
+            Err(e) => {
+                eprintln!("could not receive message from socket: {}", e);
+                ui_sender
+                    .send(UiAction::Disconnected(Some(e.to_string())))
+                    .await
+                    .unwrap();
+                continue;
+            }
+        }
+
+        ui_sender.send(UiAction::Locking).await.unwrap();
+
+        match recv_message(&mut socket_read).await {
+            Ok(message) => {
+                if message.get("status") != Some(&json!("lock acquired")) {
+                    eprintln!(
+                        "error: received unexpected message: {}",
+                        message.to_string()
+                    );
+                    ui_sender
+                        .send(UiAction::Disconnected(Some(message.to_string())))
+                        .await
+                        .unwrap();
+                    continue;
+                }
+            }
+            Err(e) => {
+                eprintln!("could not receive message from socket: {}", e);
+                ui_sender
+                    .send(UiAction::Disconnected(Some(e.to_string())))
+                    .await
+                    .unwrap();
+                continue;
+            }
+        }
+
         ui_sender.send(UiAction::Connected).await.unwrap();
 
         let (audio_tx, mut audio_rx) = watch::channel(());
@@ -94,7 +173,8 @@ async fn handle_connection(
             let host = cpal::default_host();
             let device = host
                 .default_input_device()
-                .expect("No input device available"); // FIXME: AAAAAA
+                .expect("No input device available");
+
             println!("Input device: {}", device.name().unwrap());
 
             let config = cpal::StreamConfig {
@@ -113,16 +193,16 @@ async fn handle_connection(
                     move |data: &[i16], _: &_| {
                         bytes_2
                             .lock()
-                            .expect("Could not audio read bytes mutex")
+                            .expect("Could not lock mutex to write audio data")
                             .extend_from_slice(bytemuck::cast_slice(data));
                         let _ = audio_tx.send(());
                     },
                     err_fn,
                     None,
                 )
-                .unwrap();
+                .expect("Failed to build audio input stream");
 
-            stream.play().unwrap();
+            stream.play().expect("Failed to start audio stream");
             let _ = audio_shutdown_rx.recv();
         });
 
@@ -132,24 +212,34 @@ async fn handle_connection(
                     match message {
                         Ok(message) => {
                             println!("{}", message.to_string());
+                            ui_sender.send(UiAction::ModelResult(message)).await.unwrap();
                         },
                         Err(e) => {
                             eprintln!("could not receive message from socket: {}", e);
+                            ui_sender
+                                .send(UiAction::Disconnected(Some(e.to_string())))
+                                .await
+                                .unwrap();
                             break;
                         },
                     }
                 }
                 _ = audio_rx.changed() => {
                     audio_rx.mark_unchanged();
-                    let data = std::mem::take(&mut *bytes.lock().expect("Could not audio read bytes mutex"));
+                    let data = std::mem::take(&mut *bytes.lock().expect("Could not lock mutex to read audio data"));
                     if let Err(e) = socket_write.write_all(&data).await {
                         eprintln!("could not write audio to socket: {}", e);
+                        ui_sender
+                            .send(UiAction::Disconnected(Some(e.to_string())))
+                            .await
+                            .unwrap();
                         break;
                     }
                 }
                 _ = connection_receiver.changed() => {
                     // Wait until we should disconnect
                     if *connection_receiver.borrow_and_update() == ConnectionState::Disconnected {
+                        ui_sender.send(UiAction::HideWindow).await.unwrap();
                         break;
                     }
                 }
@@ -158,23 +248,24 @@ async fn handle_connection(
 
         let _ = audio_shutdown_tx.send(());
         audio_thread.join().expect("Could not join audio_thread");
+
+        ui_sender.send(UiAction::Disconnected(None)).await.unwrap();
     }
 }
 
 async fn handle_hotkey(
     mut hotkey_receiver: mpsc::Receiver<HotkeyEvent>,
-    ui_sender: mpsc::Sender<UiAction>,
     connection_sender: watch::Sender<ConnectionState>,
 ) {
     while let Some(event) = hotkey_receiver.recv().await {
         match event {
             HotkeyEvent::Pressed => {
-                ui_sender.send(UiAction::ShowWindow).await.unwrap();
                 let _ = connection_sender.send(ConnectionState::Connected);
+                // window will be hidden as soon as connection task is ready
             }
             HotkeyEvent::Released => {
-                ui_sender.send(UiAction::HideWindow).await.unwrap();
                 let _ = connection_sender.send(ConnectionState::Disconnected);
+                // window will be hidden as soon as transcription task is finished
             }
         }
     }
@@ -227,6 +318,24 @@ fn build_ui(app: &Application, opts: Command) {
         .build();
     main_box.add_css_class("main-box");
 
+    let lines_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(5)
+        .can_target(false)
+        .can_focus(false)
+        .focus_on_click(false)
+        .build();
+    main_box.append(&lines_box);
+
+    let status_label = Label::builder()
+        .halign(gtk::Align::Start)
+        .can_target(false)
+        .can_focus(false)
+        .focus_on_click(false)
+        .build();
+    status_label.add_css_class("connection-status");
+    main_box.append(&status_label);
+
     // Create a new window and present it
     let window = ApplicationWindow::builder()
         .application(app)
@@ -276,48 +385,102 @@ fn build_ui(app: &Application, opts: Command) {
     }));
 
     // Spawn hotkey processor
-    runtime().spawn(
-        glib::clone!(@strong ui_sender, @strong connection_sender => async move {
-            handle_hotkey(hotkey_receiver, ui_sender, connection_sender).await;
-        }),
-    );
+    runtime().spawn(glib::clone!(@strong connection_sender => async move {
+        handle_hotkey(hotkey_receiver, connection_sender).await;
+    }));
 
     // Ui updater
     glib::spawn_future_local(async move {
+        let mut current_line = None;
+        let mut current_markup = "".to_string();
+
+        let gradient = colorgrad::CustomGradient::new()
+            .html_colors(&[
+                "#fe0000", "#fb3209", "#f74811", "#f35918", "#ef671e", "#ea7423", "#e67f28",
+                "#e18a2c", "#dc9430", "#d79e34", "#d1a738", "#cbb03b", "#c4b93d", "#bcc23e",
+                "#b2cc3d", "#a6d53a", "#97df36", "#82e92e", "#62f321", "#00ff00",
+            ])
+            .build()
+            .expect("Could not build color gradient");
+
         while let Some(ui_action) = ui_receiver.recv().await {
             match ui_action {
-                UiAction::AddText(text) => {} //label.set_text(&format!("{}{}", label.text(), text)),
+                UiAction::ModelResult(value) => {
+                    match serde_json::from_value::<TokenResult>(value) {
+                        Ok(res) => {
+                            for token in res.tokens {
+                                if current_line.is_none() {
+                                    let label = Label::builder()
+                                        .wrap(true)
+                                        .wrap_mode(gdk::pango::WrapMode::WordChar)
+                                        .justify(gtk::Justification::Left)
+                                        .halign(gtk::Align::Start)
+                                        .can_target(false)
+                                        .can_focus(false)
+                                        .focus_on_click(false)
+                                        .build();
+                                    label.add_css_class("transcribed-text");
+                                    lines_box.append(&label);
+
+                                    current_line = Some(label.clone());
+                                };
+
+                                let markup = format!(
+                                    "{current_markup}<span color=\"{fg}\">{text}</span>",
+                                    fg = gradient.at(token.probability.into()).to_hex_string(),
+                                    text = glib::markup_escape_text(if current_markup.is_empty() {
+                                        &token.word.trim()
+                                    } else {
+                                        &token.word
+                                    })
+                                );
+
+                                current_line.as_ref().unwrap().set_markup(&markup);
+                                current_markup = markup;
+
+                                if token.word.ends_with('.') {
+                                    let label_2 = std::mem::take(&mut current_line.unwrap());
+                                    let lines_box_2 = lines_box.clone();
+                                    gtk::glib::timeout_add_local_once(
+                                        Duration::from_millis(6000),
+                                        move || {
+                                            lines_box_2.remove(&label_2);
+                                        },
+                                    );
+
+                                    current_line = None;
+                                    current_markup = "".to_string();
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("error: ignoring invalid model result data: {e}"),
+                    }
+                }
                 UiAction::HideWindow => {
                     //window.set_visible(false);
+                    while let Some(c) = lines_box.last_child() {
+                        lines_box.remove(&c);
+                    }
                 }
                 UiAction::ShowWindow => {
                     //window.set_visible(true);
-
-                    let label = Label::builder()
-                        .wrap(true)
-                        .wrap_mode(gdk::pango::WrapMode::WordChar)
-                        .justify(gtk::Justification::Left)
-                        .halign(gtk::Align::Start)
-                        .can_target(false)
-                        .can_focus(false)
-                        .focus_on_click(false)
-                        .build();
-                    label.add_css_class("transcribed-text");
-                    label.set_markup(
-                        "<span color='red'>Hell o aegjro ijaoirgjoi jaroigja oirjgoairj oiajrgoiajrgoij oairgj aorgi rgi gir igrigri rgayrgairg iargi arigai rgargarg</span> <span color='green'>world</span>",
-                    );
-
-                    main_box.append(&label);
-
-                    let label = label.clone();
-                    let main_box = main_box.clone();
-                    gtk::glib::timeout_add_local_once(Duration::from_millis(1500), move || {
-                        main_box.remove(&label);
-                    });
                 }
-                UiAction::Disconnected => {}
-                UiAction::Connected => {}
-                UiAction::Connecting => {}
+                UiAction::Disconnected(reason) => {
+                    let mut message = "<span color='gray'></span> Disconnected".to_string();
+                    if let Some(reason) = reason {
+                        message += &format!(" <span color='gray'>{}</span>", reason);
+                    }
+                    status_label.set_markup(&message);
+                }
+                UiAction::Connecting => {
+                    status_label.set_markup("<span color='yellow'></span> Connecting");
+                }
+                UiAction::Locking => {
+                    status_label.set_markup("<span color='orange'></span> Waiting for model lock");
+                }
+                UiAction::Connected => {
+                    status_label.set_markup("<span color='#4ab0fa'></span> Connected");
+                }
             }
         }
     });

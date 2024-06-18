@@ -12,7 +12,13 @@ window {
 	border: 4px solid alpha(#000000, 0.4);
 }
 
+.connection-status {
+	color: #e3e6eb;
+	font-size: 1.5rem;
+	margin-top: 12px;
+}
+
 .transcribed-text {
 	color: #e3e6eb;
-	font-size: 6rem;
+	font-size: 3rem;
 }

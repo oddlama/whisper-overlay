@@ -1,7 +1,10 @@
 use color_eyre::eyre::bail;
 use color_eyre::eyre::Result;
+use color_eyre::owo_colors::OwoColorize;
+use color_eyre::owo_colors::Rgb;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use gdk::glib::ExitCode;
+use gdk::Monitor;
 use gdk_wayland::prelude::*;
 use gdk_wayland::WaylandSurface;
 use gtk::cairo::{RectangleInt, Region};
@@ -11,6 +14,8 @@ use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
 use serde::Deserialize;
 use serde_json::json;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -23,6 +28,7 @@ use tokio::sync::watch;
 use crate::cli::Command;
 use crate::cli::ConnectionOpts;
 use crate::hotkeys::HotkeyEvent;
+use crate::keyboard::spawn_virtual_keyboard;
 use crate::runtime;
 use crate::util::recv_message;
 use crate::util::send_audio_data;
@@ -279,10 +285,10 @@ async fn handle_connection(
                                 break;
                             }
 
-                            // If the server fails to respond within 1 second, we will force-kill.
+                            // If the server fails to respond within a short timeframe, we will force-kill.
                             let shutdown_tx_2 = shutdown_tx.clone();
                             runtime().spawn(async move {
-                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                tokio::time::sleep(Duration::from_millis(200)).await;
                                 println!("Server has not responded to flush, forcing disconnect now.");
                                 let _ = shutdown_tx_2.send(());
                             });
@@ -335,8 +341,12 @@ pub fn launch_app(opts: Command) -> Result<()> {
     // Create a new application
     let app = Application::builder().application_id(APP_ID).build();
 
+    let Command::Overlay { style, .. } = opts.clone() else {
+        bail!("got invalid command options");
+    };
+
     // Connect to signals
-    app.connect_startup(|_| load_css());
+    app.connect_startup(move |_| load_css(style.clone()));
     app.connect_activate(move |app| build_ui(app, opts.clone()));
 
     // Run the application
@@ -348,10 +358,14 @@ pub fn launch_app(opts: Command) -> Result<()> {
     Ok(())
 }
 
-fn load_css() {
+fn load_css(style: Option<PathBuf>) {
     // Load the CSS file and add it to the provider
     let provider = CssProvider::new();
-    provider.load_from_string(include_str!("style.css"));
+    if let Some(path) = style {
+        provider.load_from_path(path);
+    } else {
+        provider.load_from_string(include_str!("style.css"));
+    }
 
     // Add the provider to the default screen
     gtk::style_context_add_provider_for_display(
@@ -399,7 +413,7 @@ fn build_ui(app: &Application, opts: Command) {
     // Create a new window and present it
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("Whisper Streaming Overlay")
+        .title("Whisper Overlay")
         .decorated(false)
         .focus_on_click(false)
         .resizable(false)
@@ -423,12 +437,12 @@ fn build_ui(app: &Application, opts: Command) {
         window.set_visible(false);
     });
 
-    //window.set_monitor();
     window.present();
 
     let (ui_sender, mut ui_receiver) = mpsc::channel(64);
     let (connection_sender, connection_receiver) = watch::channel(ConnectionState::Disconnected);
     let (hotkey_sender, hotkey_receiver) = mpsc::channel(64);
+    let (virtual_keyboard_sender, virtual_keyboard_receiver) = mpsc::channel(64);
 
     // Spawn connection manager
     runtime().spawn(
@@ -446,6 +460,8 @@ fn build_ui(app: &Application, opts: Command) {
     runtime().spawn(glib::clone!(@strong connection_sender => async move {
         handle_hotkey(hotkey_receiver, connection_sender).await;
     }));
+
+    spawn_virtual_keyboard(virtual_keyboard_receiver).expect("Failed to spawn virutal keyboard");
 
     // Ui updater
     glib::spawn_future_local(async move {
@@ -466,7 +482,10 @@ fn build_ui(app: &Application, opts: Command) {
                 UiAction::ModelResult(value) => {
                     match serde_json::from_value::<TokenResult>(value) {
                         Ok(res) => {
+                            let mut line_to_type = "".to_string();
                             for token in res.tokens {
+                                line_to_type += &token.word;
+
                                 if current_line.is_none() {
                                     let label = Label::builder()
                                         .wrap(true)
@@ -478,19 +497,31 @@ fn build_ui(app: &Application, opts: Command) {
                                         .focus_on_click(false)
                                         .build();
                                     label.add_css_class("transcribed-text");
+                                    label.add_tick_callback(move |widget, _| {
+                                        widget.queue_draw();
+                                        glib::ControlFlow::Continue
+                                    });
                                     lines_box.append(&label);
 
                                     current_line = Some(label.clone());
+                                    println!();
                                 };
+
+                                let color = gradient.at(token.probability.into());
+                                let rgba = color.to_rgba8();
+                                let word = if current_markup.is_empty() {
+                                    token.word.trim()
+                                } else {
+                                    &token.word
+                                };
+
+                                print!("{}", word.color(Rgb(rgba[0], rgba[1], rgba[2])));
+                                let _ = std::io::stdout().flush();
 
                                 let markup = format!(
                                     "{current_markup}<span color=\"{fg}\">{text}</span>",
-                                    fg = gradient.at(token.probability.into()).to_hex_string(),
-                                    text = glib::markup_escape_text(if current_markup.is_empty() {
-                                        token.word.trim()
-                                    } else {
-                                        &token.word
-                                    })
+                                    fg = color.to_hex_string(),
+                                    text = glib::markup_escape_text(word)
                                 );
 
                                 current_line.as_ref().unwrap().set_markup(&markup);
@@ -509,6 +540,10 @@ fn build_ui(app: &Application, opts: Command) {
                                     current_line = None;
                                     current_markup = "".to_string();
                                 }
+                            }
+
+                            if !line_to_type.is_empty() {
+                                let _ = virtual_keyboard_sender.send(line_to_type).await;
                             }
                         }
                         Err(e) => eprintln!("error: ignoring invalid model result data: {e}"),

@@ -73,6 +73,10 @@
           pkgs.rust-analyzer
         ];
 
+        language.c.libraries = [
+          pkgs.libxkbcommon
+      ];
+
         language.c.includes = [
           pkgs.gtk4
           pkgs.gtk4-layer-shell

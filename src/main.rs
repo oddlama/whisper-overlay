@@ -1,5 +1,5 @@
 use crate::cli::ConnectionOpts;
-use crate::util::{send_message};
+use crate::util::send_message;
 use clap::Parser;
 use color_eyre::eyre::Result;
 use serde_json::json;
@@ -10,6 +10,7 @@ use tokio::runtime::Runtime;
 mod app;
 mod cli;
 mod hotkeys;
+mod keyboard;
 mod util;
 mod waybar;
 

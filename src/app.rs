@@ -1,12 +1,8 @@
-use color_eyre::eyre::bail;
-use color_eyre::eyre::Result;
-use color_eyre::owo_colors::OwoColorize;
-use color_eyre::owo_colors::Rgb;
+use color_eyre::eyre::{bail, Result};
+use color_eyre::owo_colors::{OwoColorize, Rgb};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use gdk::glib::ExitCode;
-use gdk::Monitor;
-use gdk_wayland::prelude::*;
-use gdk_wayland::WaylandSurface;
+use gdk_wayland::{prelude::*, WaylandSurface};
 use gtk::cairo::{RectangleInt, Region};
 use gtk::gdk::Display;
 use gtk::{glib, Application, ApplicationWindow, Label};
@@ -16,23 +12,17 @@ use serde::Deserialize;
 use serde_json::json;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::net::tcp::OwnedReadHalf;
-use tokio::net::tcp::OwnedWriteHalf;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
-use crate::cli::Command;
-use crate::cli::ConnectionOpts;
+use crate::cli::{Command, ConnectionOpts};
 use crate::hotkeys::HotkeyEvent;
 use crate::keyboard::spawn_virtual_keyboard;
 use crate::runtime;
-use crate::util::recv_message;
-use crate::util::send_audio_data;
-use crate::util::send_message;
+use crate::util::{recv_message, send_audio_data, send_message};
 
 const APP_ID: &str = "org.oddlama.whisper-overlay";
 
@@ -377,7 +367,9 @@ fn load_css(style: Option<PathBuf>) {
 
 fn build_ui(app: &Application, opts: Command) {
     let Command::Overlay {
-        connection_opts, ..
+        connection_opts,
+        hotkey,
+        ..
     } = opts
     else {
         panic!("build_ui() got invalid command options");
@@ -453,7 +445,7 @@ fn build_ui(app: &Application, opts: Command) {
 
     // Spawn hotkey detector
     runtime().spawn(glib::clone!(@strong hotkey_sender => async move {
-        crate::hotkeys::register(hotkey_sender).await;
+        crate::hotkeys::register(hotkey_sender, hotkey).await;
     }));
 
     // Spawn hotkey processor

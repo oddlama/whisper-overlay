@@ -41,8 +41,10 @@
           pkgs.gdk-pixbuf
           pkgs.harfbuzz
           pkgs.vulkan-loader
+          pkgs.alsa-lib
+          pkgs.libxkbcommon
         ];
-        cargoHash = "sha256-N/Kenj0IdxexjcpL5EmKbbzZFUOxSDFXyylCn141bDU=";
+        cargoHash = "sha256-1P2TfPHPX9zyNP2zXkoAZfV1L89+vujZF+G2Ida6O3A=";
       };
 
       # `nix develop`

@@ -22,18 +22,10 @@ pub enum Command {
         #[arg(short, short, long, default_value=None)]
         style: Option<PathBuf>,
 
-        /// Forces the overlay to open on the specified monitor. Otherwise
-        /// the monitor will be determined by your compositor.
-        #[arg(short, long, default_value=None)]
-        monitor: Option<String>,
-
-        /// Use the specified sound input device. Uses the default device if not given.
-        #[arg(short, long, default_value=None)]
-        input: Option<String>,
-
-        /// Specifies the hotkey to activate voice input.
-        #[arg(long, default_value=None)]
-        hotkey: Option<String>,
+        /// Specifies the hotkey to activate voice input. You can use any
+        /// key or button name from [evdev::Key](https://docs.rs/evdev/latest/evdev/struct.Key.html)
+        #[arg(long, default_value="KEY_RIGHTCTRL")]
+        hotkey: String,
     },
     Load {
         #[clap(flatten)]

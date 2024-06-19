@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use evdev::{Device, InputEventKind, Key};
 use gtk::glib;
@@ -12,7 +12,12 @@ pub enum HotkeyEvent {
     Released,
 }
 
-pub async fn evdev_listen_device(sender: mpsc::Sender<HotkeyEvent>, path: PathBuf, device: Device) {
+pub async fn evdev_listen_device(
+    sender: mpsc::Sender<HotkeyEvent>,
+    path: PathBuf,
+    device: Device,
+    key: Key,
+) {
     let name = device.name().unwrap_or("Unnamed device");
     let name = format!("{} ({})", name, path.display());
 
@@ -33,26 +38,29 @@ pub async fn evdev_listen_device(sender: mpsc::Sender<HotkeyEvent>, path: PathBu
             }
         };
 
-        if let InputEventKind::Key(Key::KEY_RIGHTCTRL) = ev.kind() {
-            if ev.value() == 0 {
-                let _ = sender.send(HotkeyEvent::Released).await;
-            } else if ev.value() == 1 {
-                let _ = sender.send(HotkeyEvent::Pressed).await;
+        if let InputEventKind::Key(k) = ev.kind() {
+            if k == key {
+                if ev.value() == 0 {
+                    let _ = sender.send(HotkeyEvent::Released).await;
+                } else if ev.value() == 1 {
+                    let _ = sender.send(HotkeyEvent::Pressed).await;
+                }
             }
         }
     }
 }
 
-pub async fn register(sender: mpsc::Sender<HotkeyEvent>) {
+pub async fn register(sender: mpsc::Sender<HotkeyEvent>, hotkey: String) {
+    let key = Key::from_str(&hotkey).expect(&format!("Could not find key with name {hotkey}"));
     evdev::enumerate()
         .filter(|(_, device)| {
             device
                 .supported_keys()
-                .map_or(false, |keys| keys.contains(Key::KEY_RIGHTCTRL))
+                .map_or(false, |keys| keys.contains(key))
         })
         .for_each(|(path, device)| {
             runtime().spawn(glib::clone!(@strong sender => async move {
-                evdev_listen_device(sender, path, device).await;
+                evdev_listen_device(sender, path, device, key).await;
             }));
         });
 }

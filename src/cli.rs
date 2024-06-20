@@ -27,14 +27,6 @@ pub enum Command {
         #[arg(long, default_value="KEY_RIGHTCTRL")]
         hotkey: String,
     },
-    Load {
-        #[clap(flatten)]
-        connection_opts: ConnectionOpts,
-    },
-    Unload {
-        #[clap(flatten)]
-        connection_opts: ConnectionOpts,
-    },
 }
 
 #[derive(Debug, Args, Clone)]

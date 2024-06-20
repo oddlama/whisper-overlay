@@ -1,6 +1,6 @@
-use color_eyre::eyre::{bail, Result};
-use color_eyre::owo_colors::{OwoColorize, Rgb};
+use color_eyre::eyre::{bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use futures_util::StreamExt;
 use gdk::glib::ExitCode;
 use gdk_wayland::{prelude::*, WaylandSurface};
 use gtk::cairo::{RectangleInt, Region};
@@ -10,13 +10,14 @@ use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
 use serde::Deserialize;
 use serde_json::json;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
+use tokio_util::codec::LengthDelimitedCodec;
 
 use crate::cli::{Command, ConnectionOpts};
 use crate::hotkeys::HotkeyEvent;
@@ -44,7 +45,7 @@ pub enum ConnectionState {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Token {
+pub struct Word {
     #[allow(unused)]
     begin: f32,
     #[allow(unused)]
@@ -54,8 +55,16 @@ pub struct Token {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TokenResult {
-    tokens: Vec<Token>,
+pub struct Segment {
+    words: Vec<Word>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelResult {
+    kind: String,
+    #[allow(unused)]
+    text: String,
+    segments: Vec<Segment>,
 }
 
 async fn connect_whisper(
@@ -214,22 +223,45 @@ async fn handle_connection(
             // Start audio thread
             *audio_active.lock().expect("Could not lock audio stop") = true;
 
+            let mut shutdown_timer: Option<JoinHandle<()>> = None;
+            let mut read_message_frame = LengthDelimitedCodec::builder()
+                .length_field_offset(0) // default value
+                .length_field_length(4)
+                .length_adjustment(0) // default value
+                .num_skip(4) // skip the first 4 bytes
+                .new_read(socket_read);
+
             loop {
                 tokio::select! {
-                    message = recv_message(&mut socket_read) => {
+                    message = read_message_frame.next() => {
+                        let Some(message) = message else {
+                            continue;
+                        };
+
+                        let message: Result<serde_json::Value> = message.wrap_err("Failed to read next message")
+                            .and_then(|x| String::from_utf8(x.to_vec()).wrap_err("Failed to convert message to utf8"))
+                            .and_then(|x| serde_json::from_str(&x).wrap_err("Failed to parse json"));
+
                         match message {
                             Ok(message) => {
-                                if message.get("status") == Some(&json!("flushed")) {
-                                    println!("Server has flushed, signalling shutdown");
-                                    let _ = shutdown_tx.send(());
-                                } else if message.get("tokens").is_some() {
+                                if message.get("segments").is_some() {
+                                    if message.get("kind") != Some(&json!("result")) {
+                                        // If this is a result message, and we have a running shutdown timer
+                                        // (i.e. we want to disconnect), we use this as the final result.
+                                        if let Some(ref timer) = shutdown_timer {
+                                            timer.abort();
+                                            shutdown_timer = None;
+                                            let _ = shutdown_tx.send(());
+                                            println!("Received final result for this session in time, signalling shutdown");
+                                        }
+                                    }
                                     ui_sender.send(UiAction::ModelResult(message)).await.unwrap();
                                 } else {
                                     eprintln!("ignoring unsolicited message: {}", message.to_string());
                                 }
                             },
                             Err(e) => {
-                                eprintln!("could not receive message from socket: {}", e);
+                                eprintln!("could not receive message from socket: {:#}", e);
                                 ui_sender
                                     .send(UiAction::Disconnected(Some(e.to_string())))
                                     .await
@@ -277,11 +309,21 @@ async fn handle_connection(
 
                             // If the server fails to respond within a short timeframe, we will force-kill.
                             let shutdown_tx_2 = shutdown_tx.clone();
-                            runtime().spawn(async move {
-                                tokio::time::sleep(Duration::from_millis(200)).await;
+                            let timer = runtime().spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(2000)).await;
                                 println!("Server has not responded to flush, forcing disconnect now.");
                                 let _ = shutdown_tx_2.send(());
                             });
+                            shutdown_timer = Some(timer);
+                        } else {
+                            // If the client wants to reconnect, cancel any running disconnect timers
+                            if let Some(ref timer) = shutdown_timer {
+                                timer.abort();
+                                shutdown_timer = None;
+                            }
+                            // Restart audio thread
+                            *audio_active.lock().expect("Could not lock audio stop") = true;
+                            println!("Staying connected due to user request...");
                         }
                     }
                 };
@@ -384,14 +426,21 @@ fn build_ui(app: &Application, opts: Command) {
         .build();
     main_box.add_css_class("main-box");
 
-    let lines_box = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(5)
+    let live_text = Label::builder()
+        .wrap(true)
+        .wrap_mode(gdk::pango::WrapMode::WordChar)
+        .justify(gtk::Justification::Left)
+        .halign(gtk::Align::Start)
         .can_target(false)
         .can_focus(false)
         .focus_on_click(false)
         .build();
-    main_box.append(&lines_box);
+    live_text.add_css_class("live-text");
+    live_text.add_tick_callback(move |widget, _| {
+        widget.queue_draw();
+        glib::ControlFlow::Continue
+    });
+    main_box.append(&live_text);
 
     let status_label = Label::builder()
         .halign(gtk::Align::Start)
@@ -457,8 +506,8 @@ fn build_ui(app: &Application, opts: Command) {
 
     // Ui updater
     glib::spawn_future_local(async move {
-        let mut current_line = None;
-        let mut current_markup = "".to_string();
+        let keep_duration = Duration::from_millis(6000);
+        let mut line_history: Vec<(SystemTime, String)> = vec![];
 
         let gradient = colorgrad::CustomGradient::new()
             .html_colors(&[
@@ -472,70 +521,65 @@ fn build_ui(app: &Application, opts: Command) {
         while let Some(ui_action) = ui_receiver.recv().await {
             match ui_action {
                 UiAction::ModelResult(value) => {
-                    match serde_json::from_value::<TokenResult>(value) {
+                    match serde_json::from_value::<ModelResult>(value) {
                         Ok(res) => {
-                            let mut line_to_type = "".to_string();
-                            for token in res.tokens {
-                                line_to_type += &token.word;
+                            let now = SystemTime::now();
 
-                                if current_line.is_none() {
-                                    let label = Label::builder()
-                                        .wrap(true)
-                                        .wrap_mode(gdk::pango::WrapMode::WordChar)
-                                        .justify(gtk::Justification::Left)
-                                        .halign(gtk::Align::Start)
-                                        .can_target(false)
-                                        .can_focus(false)
-                                        .focus_on_click(false)
-                                        .build();
-                                    label.add_css_class("transcribed-text");
-                                    label.add_tick_callback(move |widget, _| {
-                                        widget.queue_draw();
-                                        glib::ControlFlow::Continue
-                                    });
-                                    lines_box.append(&label);
+                            // Expire old history
+                            line_history.retain(|&(time, _)| {
+                                now.duration_since(time)
+                                    .map_or(false, |x| x <= keep_duration)
+                            });
 
-                                    current_line = Some(label.clone());
-                                    println!();
-                                };
+                            let mut to_type = "".to_string();
+                            let mut line_markup = "".to_string();
+                            let mut markup = line_history
+                                .iter()
+                                .map(|(_, markup)| markup)
+                                .cloned()
+                                .collect::<Vec<String>>()
+                                .join("\n");
 
-                                let color = gradient.at(token.probability.into());
-                                let rgba = color.to_rgba8();
-                                let word = if current_markup.is_empty() {
-                                    token.word.trim()
-                                } else {
-                                    &token.word
-                                };
-
-                                print!("{}", word.color(Rgb(rgba[0], rgba[1], rgba[2])));
-                                let _ = std::io::stdout().flush();
-
-                                let markup = format!(
-                                    "{current_markup}<span color=\"{fg}\">{text}</span>",
-                                    fg = color.to_hex_string(),
-                                    text = glib::markup_escape_text(word)
-                                );
-
-                                current_line.as_ref().unwrap().set_markup(&markup);
-                                current_markup = markup;
-
-                                if token.word.ends_with('.') {
-                                    let label_2 = std::mem::take(&mut current_line.unwrap());
-                                    let lines_box_2 = lines_box.clone();
-                                    gtk::glib::timeout_add_local_once(
-                                        Duration::from_millis(6000),
-                                        move || {
-                                            lines_box_2.remove(&label_2);
-                                        },
-                                    );
-
-                                    current_line = None;
-                                    current_markup = "".to_string();
+                            for (si, segment) in res.segments.iter().enumerate() {
+                                if si != 0 {
+                                    line_markup += "\n";
                                 }
+
+                                for (wi, word) in segment.words.iter().enumerate() {
+                                    let color = gradient.at(word.probability.into());
+                                    let word = if wi == 0 {
+                                        word.word.trim_start()
+                                    } else {
+                                        &word.word
+                                    };
+
+                                    //let rgba = color.to_rgba8();
+                                    //print!("{}", word.color(Rgb(rgba[0], rgba[1], rgba[2])));
+                                    //let _ = std::io::stdout().flush();
+
+                                    to_type += &word;
+                                    line_markup += &format!(
+                                        "<span color=\"{fg}\">{text}</span>",
+                                        fg = color.to_hex_string(),
+                                        text = glib::markup_escape_text(word)
+                                    );
+                                }
+
+                                to_type = to_type.trim_end().to_string() + "\n";
                             }
 
-                            if !line_to_type.is_empty() {
-                                let _ = virtual_keyboard_sender.send(line_to_type).await;
+                            if !markup.is_empty() {
+                                markup += "\n";
+                            }
+                            markup += &line_markup;
+                            live_text.set_markup(&markup);
+
+                            // Add line to history if we have a result
+                            if res.kind == "result" {
+                                if !to_type.is_empty() {
+                                    let _ = virtual_keyboard_sender.send(to_type).await;
+                                }
+                                line_history.push((now, line_markup))
                             }
                         }
                         Err(e) => eprintln!("error: ignoring invalid model result data: {e}"),
@@ -544,9 +588,7 @@ fn build_ui(app: &Application, opts: Command) {
                 UiAction::HideWindow => {
                     window.set_visible(false);
                     window.queue_draw();
-                    while let Some(c) = lines_box.last_child() {
-                        lines_box.remove(&c);
-                    }
+                    live_text.set_markup("");
                 }
                 UiAction::ShowWindow => {
                     // Just don't ask, this is not an oversight!

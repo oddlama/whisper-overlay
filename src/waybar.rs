@@ -8,7 +8,6 @@ use tokio::net::TcpStream;
 
 #[derive(Debug, Deserialize)]
 struct StatusMessage {
-    state: String,
     clients: u32,
     waiting: u32,
 }
@@ -16,10 +15,9 @@ struct StatusMessage {
 pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> {
     let status_offline = json!({
         "text": "",
-        "alt": "none",
+        "alt": "disconnected",
         "tooltip": format!("Server offline ({})", connection_opts.address),
         "class": "disconnected",
-        "state": "unloaded",
         "clients": 0,
         "waiting": 0,
     });
@@ -35,10 +33,9 @@ pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> 
     'outer: loop {
         let mut socket = match TcpStream::connect(&connection_opts.address).await {
             Ok(socket) => socket,
-            Err(e) => {
-                eprintln!("error: {e}");
+            Err(_) => {
+                //eprintln!("error: {e}");
                 update_status(status_offline.clone());
-                // FIXME: make this a setting
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             }
@@ -47,7 +44,6 @@ pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> 
         if let Err(e) = send_message(&mut socket, json!({"mode": "status"})).await {
             eprintln!("error: {e}");
             update_status(status_offline.clone());
-            // FIXME: make this a setting
             tokio::time::sleep(Duration::from_secs(5)).await;
             continue;
         }
@@ -58,7 +54,6 @@ pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> 
                 Err(e) => {
                     eprintln!("error: {e}");
                     update_status(status_offline.clone());
-                    // FIXME: make this a setting
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue 'outer;
                 }
@@ -69,18 +64,17 @@ pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> 
                 Err(e) => {
                     eprintln!("error: {e}");
                     update_status(status_offline.clone());
-                    // FIXME: make this a setting
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue 'outer;
                 }
             };
 
+            let class = format!("connected{}", (if message.waiting < message.clients { "-active" } else { "" }));
             let status = json!({
                 "text": "",
-                "alt": "none",
+                "alt": class,
                 "tooltip": format!("Connected ({})", connection_opts.address),
-                "class": format!("connected-{}{}", message.state, (if message.waiting < message.clients { "-active" } else { "" })),
-                "state": message.state,
+                "class": class,
                 "clients": message.clients,
                 "waiting": message.waiting,
             });

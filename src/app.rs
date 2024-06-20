@@ -494,7 +494,7 @@ fn build_ui(app: &Application, opts: Command) {
 
     // Spawn hotkey detector
     runtime().spawn(glib::clone!(@strong hotkey_sender => async move {
-        crate::hotkeys::register(hotkey_sender, hotkey).await;
+        crate::hotkeys::register_and_watch(hotkey_sender, hotkey).await;
     }));
 
     // Spawn hotkey processor

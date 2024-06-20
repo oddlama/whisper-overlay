@@ -77,7 +77,7 @@
 
         language.c.libraries = [
           pkgs.libxkbcommon
-      ];
+        ];
 
         language.c.includes = [
           pkgs.gtk4

@@ -14,9 +14,9 @@ struct StatusMessage {
 
 pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> {
     let status_offline = json!({
-        "text": "",
+        "text": "Disconnected",
         "alt": "disconnected",
-        "tooltip": format!("Server offline ({})", connection_opts.address),
+        "tooltip": format!("Server: {}\nStatus: Disconnected", connection_opts.address),
         "class": "disconnected",
         "clients": 0,
         "waiting": 0,
@@ -69,11 +69,23 @@ pub async fn main_waybar_status(connection_opts: &ConnectionOpts) -> Result<()> 
                 }
             };
 
-            let class = format!("connected{}", (if message.waiting < message.clients { "-active" } else { "" }));
+            let class = format!(
+                "connected{}",
+                (if message.waiting < message.clients {
+                    "-active"
+                } else {
+                    ""
+                })
+            );
             let status = json!({
-                "text": "",
+                "text": (if message.waiting < message.clients { "-active" } else { "" }),
                 "alt": class,
-                "tooltip": format!("Connected ({})", connection_opts.address),
+                "tooltip": format!(
+                    "Server: {}\nStatus: Connected\nActive clients: {}\nWaiting clients: {}",
+                    connection_opts.address,
+                    message.clients - message.waiting,
+                    message.waiting
+                ),
                 "class": class,
                 "clients": message.clients,
                 "waiting": message.waiting,

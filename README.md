@@ -24,13 +24,20 @@ Requirements:
 
 ## 🚀 Quick Start
 
+- Run server
+
+- Start whisper-overlay
+
+Press and hold <kbd>Right Ctrl</kbd> to transcribe. For a permanent installation
+I recommend starting the server as a systemd service and adding the `whisper-overlay overlay`
+as a startup command to your desktop environment / compositor.
 
 ## ⚙️ Usage
 
 In principle you just need to start `./realtime-stt-server.py` and it will be listening for requests on `localhost:7007`.
 You can then start `whisper-overlay overlay` to transcribe text. The default hotkey is <kbd>Right Ctrl</kbd>,
 but you can change this by specifying any name from [evdev::Key](https://docs.rs/evdev/latest/evdev/struct.Key.html),
-for example `KEY_F12`. Beware that the hotkey is only observed and will still be passed to the application that is focused.
+for example `KEY_F12` for <kbd>F12</kbd>. Beware that the hotkey is only observed and will still be passed to the application that is focused.
 
 #### Server (realtime-stt-server)
 
@@ -72,7 +79,11 @@ Options:
 
 ## 📦 Installation
 
-#### NixOS
+<details>
+<summary>
+
+### ❄️ NixOS
+</summary>
 
 This application comes with a NixOS module and overlay so you can easily access the relevant packages
 and host the realtime-stt-server. First, add this flake as an input:
@@ -108,9 +119,14 @@ so you can start it later.
 
 The server will now be started automatically with your system,
 and you can run `whisper-overlay overlay` as your user.
-You might
+You might want to add this.
 
-#### From source
+</details>
+<details>
+<summary>
+
+### 🧰 Manually
+</summary>
 
 First, install and start the server:
 
@@ -141,6 +157,8 @@ git clone https://github.com/oddlama/whisper-overlay
 cargo build --release
 ./target/release/whisper-overlay overlay
 ```
+
+</details>
 
 ## 🌟 Waybar integration
 

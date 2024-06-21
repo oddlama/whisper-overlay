@@ -7,10 +7,9 @@
   faster-whisper,
   pyaudio,
   scipy,
-  torchWithCuda,
+  torch,
   torchaudio,
   webrtcvad,
-  websockets,
 }:
 buildPythonPackage rec {
   pname = "realtime-stt";
@@ -32,10 +31,9 @@ buildPythonPackage rec {
     faster-whisper
     pyaudio
     scipy
-    torchWithCuda
+    torch
     torchaudio
     webrtcvad
-    websockets
   ];
 
   postPatch = ''
@@ -62,12 +60,12 @@ buildPythonPackage rec {
           "torch",
           "torchaudio",
           "scipy",
-          "websockets",
       ],
     )
     EOF
   '';
 
+  dontUseSetuptoolsCheck = true;
   pythonImportsCheck = ["RealtimeSTT"];
 
   meta = {

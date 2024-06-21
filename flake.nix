@@ -20,6 +20,9 @@
         ./nix/devshell.nix
         ./nix/packages/realtime-stt-server.nix
         ./nix/packages/whisper-overlay.nix
+
+        # Derive the output overlay automatically from all packages that we define.
+        inputs.flake-parts.flakeModules.easyOverlay
       ];
 
       systems = [
@@ -27,11 +30,18 @@
         "aarch64-linux"
       ];
 
+      flake = {config, ...}: {
+        nixosModules.default = {
+          imports = [./nix/nixosModules/realtime-stt-server.nix];
+          nixpkgs.overlays = [config.overlays.default];
+        };
+      };
+
       perSystem = {system, ...}: {
         _module.args.pkgs = import inputs.nixpkgs {
           inherit system;
           config.allowUnfree = true;
-          config.cudaSupport = true;
+          #config.cudaSupport = true;
         };
       };
     };

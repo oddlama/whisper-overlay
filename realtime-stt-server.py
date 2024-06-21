@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
+"""
+A server for RealtimeSTT made to be used with whisper-overlay.
+"""
+
 import argparse
 import json
 import logging
-import numpy as np
 import queue
 import socket
 import struct
@@ -157,13 +160,33 @@ def handle_client(conn, addr):
 if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s %(message)s")
     logger = logging.getLogger("realtime-stt-server")
-    logger.setLevel(logging.DEBUG)
-    #logging.getLogger().setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default='localhost')
-    parser.add_argument("--port", type=int, default=7007)
+    parser.add_argument("--host", type=str, default='localhost',
+        help="The host to listen on [default: 'localhost']")
+    parser.add_argument("--port", type=int, default=7007,
+        help="The port to listen on [default: 7007]")
+    parser.add_argument("--device", type=str, default="cuda",
+        help="Device to run the models on, defaults to cuda if available, else cpu [default: 'cuda']")
+    parser.add_argument("--model", type=str, default="large-v3",
+        help="Main model used to generate the final transcription [default: 'large-v3']")
+    parser.add_argument("--model-realtime", type=str, default="base",
+        help="Faster model used to generate live transcriptions [default: 'base']")
+    parser.add_argument("--language", type=str, default="",
+        help="Set the spoken language. Leave empty to auto-detect. [default: '']")
+    parser.add_argument("--debug", action="store_true",
+        help="Enable debug log output [default: unset]")
+
     args = parser.parse_args()
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    # FIXME: workaround until we can update RealtimeSTT to support device params
+    if args.device == "cpu":
+        import torch
+        torch.cuda.is_available = lambda: False
 
     logger.info("Importing runtime")
     from RealtimeSTT import AudioToTextRecorder
@@ -178,12 +201,13 @@ if __name__ == "__main__":
     recorder_ready = threading.Event()
     recorder_config = {
         'init_logging': False,
+        # FIXME: once fixed upstream 'device': args.device,
 
         'use_microphone': False,
         'spinner': False,
-        'model': 'large-v3',
+        'model': args.model,
         'return_segments': True,
-        #'language': 'en',
+        'language': args.language,
 
         'silero_sensitivity': 0.4,
         'webrtc_sensitivity': 2,
@@ -193,7 +217,7 @@ if __name__ == "__main__":
 
         'enable_realtime_transcription': True,
         'realtime_processing_pause': 0,
-        'realtime_model_type': 'base',
+        'realtime_model_type': args.model_realtime,
 
         'on_realtime_transcription_stabilized': text_detected,
     }

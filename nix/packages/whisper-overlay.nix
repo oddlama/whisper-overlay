@@ -22,13 +22,17 @@
       pkgs.alsa-lib
     ];
   in {
+    overlayAttrs = {
+      inherit (config.packages) whisper-overlay;
+    };
+
     packages.default = config.packages.whisper-overlay;
     packages.whisper-overlay = pkgs.rustPlatform.buildRustPackage {
       pname = "whisper-overlay";
-      version = "1.0.0";
+      inherit ((builtins.fromTOML (builtins.readFile ../../Cargo.toml)).package) version;
 
       src = ../../.;
-      cargoHash = "";
+      cargoHash = "sha256-HBbQ14Kxx09qpC5Jwe6mMal0F4NJ+Zb2rl/YvClzVl4=";
 
       nativeBuildInputs = [
         pkgs.pkg-config

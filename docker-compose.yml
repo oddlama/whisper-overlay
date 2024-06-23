@@ -1,0 +1,21 @@
+services:
+  realtime-stt-server:
+    build:
+      context: .
+      target: gpu # or cpu
+    image: realtime-stt-server
+    container_name: realtime-stt-server
+    volumes:
+      - cache:/root/.cache
+    ports:
+      - "7007:7007"
+
+    # if 'gpu' target
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - capabilities: ["gpu"]
+
+volumes:
+  cache:

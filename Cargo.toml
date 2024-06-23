@@ -3,7 +3,11 @@ name = "whisper-overlay"
 version = "1.0.0"
 edition = "2021"
 authors = ["oddlama <oddlama@oddlama.org>"]
-description = "A wayland overlay providing a hotkey for live speech-to-text input via faster-whisper"
+description = "A wayland overlay providing speech-to-text functionality for any application via a global push-to-talk hotkey"
+homepage = "https://github.com/oddlama/whisper-overlay"
+repository = "https://github.com/oddlama/embedded-devices"
+keywords = ["whisper", "speech-to-text", "stt", "faster-whisper", "wayland"]
+categories = ["command-line-utilities"]
 license = "MIT"
 
 [dependencies]

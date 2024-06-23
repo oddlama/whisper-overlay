@@ -25,16 +25,26 @@ Requirements:
 
 ## 🚀 Quick Start
 
-- Run server
+- Clone the repository
+  ```
+  git clone https://github.com/oddlama/whisper-overlay
+  cd whisper-overlay
+  ```
 
-- Start whisper-overlay
+- Run the realtime-stt-server using docker
+  ```
+  docker-compose up
+  ```
 
-```
-cargo install whisper-overlay
-whisper-overlay overlay
-```
+- Install and run whisper-overlay
+  ```
+  cargo install whisper-overlay
+  whisper-overlay overlay
+  # Or alternatively select a hotkey:
+  #whisper-overlay overlay --hotkey KEY_F12
+  ```
 
-Press and hold <kbd>Right Ctrl</kbd> to transcribe. For a permanent installation
+Now press and hold <kbd>Right Ctrl</kbd> to transcribe. For a permanent installation
 I recommend starting the server as a systemd service and adding the `whisper-overlay overlay`
 as a startup command to your desktop environment / compositor.
 
@@ -85,6 +95,28 @@ Options:
 
 ## 📦 Installation
 
+<details>
+<summary>
+
+### ❄️ 🐳 Docker & cargo
+</summary>
+
+For a quick and simple install, you can run the server using docker and
+install the overlay directly via cargo:
+
+```bash
+git clone https://github.com/oddlama/whisper-overlay
+cd whisper-overlay
+
+# Start realtime-stt-server
+docker-compose up
+
+# Install and run overlay
+cargo install whisper-overlay
+whisper-overlay overlay
+```
+
+</details>
 <details>
 <summary>
 

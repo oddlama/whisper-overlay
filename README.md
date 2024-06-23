@@ -3,9 +3,10 @@
 ## 💬 whisper-overlay
 
 A wayland overlay providing speech-to-text functionality for any application via a global push-to-talk hotkey.
-Anything you say while pressing the hotkey will be shown on-screen in real-time using a faster but less accurate model,
-and as soon as you pause speaking or release the hotkey, the full accuracy transcription will be shown and typed
-into the window that is currently focused.
+Anything you are saying while holding the hotkey will be transcribed in real-time and shown on-screen.
+The live transcriptions use a faster but less accurate model but as soon as you pause speaking or release
+the hotkey, the transcription will be updated using a second, more accurate model.
+This resulting text will then be tryped into the window that is currently focused.
 
 - On-screen, realtime live transcriptions via CUDA and faster-whisper
 - The server-client based architecture allows you to host the model on another machine
@@ -18,7 +19,7 @@ for both the actual realtime and high-fidelity transcription model.
 
 Requirements:
 
-- A wayland compositor
+- A wayland compositor (sway, hyprland, ...)
 - A GPU with CUDA support is highly recommended, otherwise translation will have a significantly latency even
   on a modern CPU (1 second latency for live transcription and ~5 seconds for the result)
 
@@ -27,6 +28,11 @@ Requirements:
 - Run server
 
 - Start whisper-overlay
+
+```
+cargo install whisper-overlay
+whisper-overlay overlay
+```
 
 Press and hold <kbd>Right Ctrl</kbd> to transcribe. For a permanent installation
 I recommend starting the server as a systemd service and adding the `whisper-overlay overlay`
@@ -148,8 +154,7 @@ git clone https://github.com/oddlama/whisper-overlay
 python ./realtime-stt-server.py
 ```
 
-Second, start the overlay:
-Running the client from source:
+Second, start the overlay by tunning the client from source:
 
 ```bash
 # Clone repository (or reuse the previous checkout)
@@ -209,8 +214,10 @@ multiple requests simultaneously at this point in time. So you will have to wait
 #### Wayland only
 
 Currently, this project _requires_ the use of a wayland compositor that supports the layer-shell and virtual-keyboard-v1 protocol extensions.
-It should work out-of-the-box on any wlroots based compositor (sway, ...) and on hyprland. X11 support is currently not planned,
-but I'm of course happy to accept contributions in that regard.
+Thus it should work out-of-the-box on any wlroots based compositor (sway, ...) and on hyprland. X11 support is currently not planned.
+There is a branch with a partial implementation for X11, but getting GTK4 to create a reliable overlay window has proven to be hard and
+auto-type doesn't work properly with enigo (the rust library in use for virtual input). But I'm of course happy to accept contributions
+in that regard if someone knows how to address the remaining issues.
 
 #### Global hotkeys via evdev
 

@@ -9,6 +9,7 @@ mod hotkeys;
 mod keyboard;
 mod util;
 mod waybar;
+mod x;
 
 pub fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();

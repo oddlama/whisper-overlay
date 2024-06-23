@@ -2,6 +2,7 @@ use color_eyre::eyre::{bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use futures_util::StreamExt;
 use gdk::glib::ExitCode;
+use gdk::Backend;
 use gdk_wayland::{prelude::*, WaylandSurface};
 use gtk::cairo::{RectangleInt, Region};
 use gtk::gdk::Display;
@@ -10,7 +11,9 @@ use gtk::{prelude::*, CssProvider};
 use gtk_layer_shell::{Layer, LayerShell};
 use serde::Deserialize;
 use serde_json::json;
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::process::exit;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -22,8 +25,9 @@ use tokio_util::codec::LengthDelimitedCodec;
 use crate::cli::{Command, ConnectionOpts};
 use crate::hotkeys::HotkeyEvent;
 use crate::keyboard::spawn_virtual_keyboard;
-use crate::runtime;
 use crate::util::{recv_message, send_audio_data, send_message};
+use crate::x::set_position;
+use crate::{runtime, x};
 
 const APP_ID: &str = "org.oddlama.whisper-overlay";
 
@@ -407,6 +411,54 @@ fn load_css(style: Option<PathBuf>) {
     );
 }
 
+fn if_x11_make_overlay(window: &gtk::ApplicationWindow) -> Result<()> {
+    let Some(Backend::X11) = window
+        .native()
+        .and_then(|x| x.surface().map(|x| x.display().backend()))
+    else {
+        return Ok(());
+    };
+
+    if let Some((display, surface)) = x::get_window_x11(window) {
+        let monitor = display.primary_monitor();
+
+        // Get the work area of the primary monitor
+        let geometry = monitor.geometry();
+
+        // Calculate the desired position.
+        // center in X, lower fourth in Y
+        let desired_x = geometry.x() + (geometry.width() - window.default_width()) / 2;
+        let desired_y = geometry.y() + (geometry.height() - window.default_height()) * 3 / 4;
+
+        unsafe {
+            surface.set_skip_pager_hint(true);
+            surface.set_skip_taskbar_hint(true);
+            x::wm_state_add(&display, &surface, "_NET_WM_STATE_ABOVE");
+            x::change_property(
+                &display,
+                &surface,
+                "_NET_WM_ALLOWED_ACTIONS",
+                x::PropMode::Replace,
+                &[
+                    x::Atom::new(&display, "_NET_WM_ACTION_CHANGE_DESKTOP").unwrap(),
+                    x::Atom::new(&display, "_NET_WM_ACTION_ABOVE").unwrap(),
+                    x::Atom::new(&display, "_NET_WM_ACTION_BELOW").unwrap(),
+                ],
+            );
+            x::change_property(
+                &display,
+                &surface,
+                "_NET_WM_WINDOW_TYPE",
+                x::PropMode::Replace,
+                &[x::Atom::new(&display, "_NET_WM_WINDOW_TYPE_UTILITY").unwrap()],
+            );
+            set_position(&display, &surface, desired_x, desired_y);
+        }
+    }
+    window.queue_resize();
+    Ok(())
+}
+
 fn build_ui(app: &Application, opts: Command) {
     let Command::Overlay {
         connection_opts,
@@ -465,6 +517,8 @@ fn build_ui(app: &Application, opts: Command) {
         .child(&main_box)
         .build();
 
+    // This is wayland-specific but doesn't do anything if we are running on X11.
+    // It only register to do internal stuff on realization of a wayland surface.
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_keyboard_mode(gtk_layer_shell::KeyboardMode::None);
@@ -473,9 +527,37 @@ fn build_ui(app: &Application, opts: Command) {
     window.set_namespace("whisper-overlay");
 
     window.connect_realize(|window| {
-        let wayland_surface = window.surface().and_downcast::<WaylandSurface>().unwrap();
-        wayland_surface.set_input_region(&Region::create_rectangle(&RectangleInt::new(0, 0, 0, 0)));
-        window.set_visible(false);
+        match window
+            .native()
+            .and_then(|x| x.surface().map(|x| x.display().backend()))
+        {
+            Some(Backend::Wayland) => {
+                let wayland_surface = window.surface().and_downcast::<WaylandSurface>().unwrap();
+                wayland_surface
+                    .set_input_region(&Region::create_rectangle(&RectangleInt::new(0, 0, 0, 0)));
+            }
+            Some(Backend::X11) => {
+                // Creating overlay is handeled in connect_show
+            }
+            b => {
+                eprintln!("error: unsupported display backend {:?}, exiting.", b);
+                exit(1);
+            }
+        };
+    });
+
+    let hide_on_next_show = Cell::new(true);
+    window.connect_show(move |window| {
+        // Hide on startup
+        if hide_on_next_show.get() {
+            window.queue_draw();
+            window.set_visible(false);
+            hide_on_next_show.set(false);
+        }
+    });
+
+    window.connect_map(|window| {
+        if_x11_make_overlay(window).expect("Could not make X11 window an overlay");
     });
 
     window.present();
@@ -591,12 +673,17 @@ fn build_ui(app: &Application, opts: Command) {
                     live_text.set_markup("");
                 }
                 UiAction::ShowWindow => {
-                    // Just don't ask, this is not an oversight!
-                    // If the window is not toggled, on, off, on, it won't show the first time.
-                    // This is somehow related to hiding the window in connect_realize.
                     window.set_visible(true);
-                    window.set_visible(false);
-                    window.set_visible(true);
+                    if let Some(Backend::Wayland) = window
+                        .native()
+                        .and_then(|x| x.surface().map(|x| x.display().backend()))
+                    {
+                        // Just don't ask, this is not an oversight!
+                        // If the window is not toggled, on, off, on, it won't show the first time.
+                        // This is somehow related to hiding the window in connect_realize.
+                        window.set_visible(false);
+                        window.set_visible(true);
+                    };
                     window.queue_draw();
                     status_label.queue_draw();
                 }

@@ -148,8 +148,7 @@ git clone https://github.com/oddlama/whisper-overlay
 python ./realtime-stt-server.py
 ```
 
-Second, start the overlay:
-Running the client from source:
+Second, start the overlay by running from source:
 
 ```bash
 # Clone repository (or reuse the previous checkout)

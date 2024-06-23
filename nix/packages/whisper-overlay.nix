@@ -6,6 +6,7 @@
   }: let
     libraries = [
       pkgs.libxkbcommon
+      pkgs.xdotool
     ];
 
     includes = [
@@ -20,6 +21,7 @@
       pkgs.harfbuzz
       pkgs.vulkan-loader
       pkgs.alsa-lib
+      pkgs.xorg.libX11
     ];
   in {
     overlayAttrs = {
@@ -38,7 +40,12 @@
         pkgs.pkg-config
         pkgs.wrapGAppsHook4
       ];
-      buildInputs = includes ++ libraries;
+      buildInputs =
+        includes
+        ++ libraries
+        ++ [
+          pkgs.xorg.xorgproto
+        ];
     };
 
     devshells.default = {
@@ -62,6 +69,14 @@
           prefix = pkgs.lib.concatStringsSep ":" [
             "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}"
             "${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}"
+          ];
+        }
+        {
+          name = "PKG_CONFIG_PATH";
+          prefix = pkgs.lib.makeSearchPath "share/pkgconfig" [
+            # xorg.xorgproto clashes with some files in xorg.libX11,
+            # so we manually add it to the search path as a prefix here
+            pkgs.xorg.xorgproto
           ];
         }
       ];

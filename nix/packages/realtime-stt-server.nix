@@ -24,8 +24,8 @@
       '';
 
       meta = {
-        description = "";
-        homepage = "";
+        description = "A server for RealtimeSTT made to be used with whisper-overlay";
+        homepage = "https://github.com/oddlama/whisper-overlay";
         license = lib.licenses.mit;
         maintainers = with lib.maintainers; [oddlama];
         mainProgram = "realtime-stt-server";

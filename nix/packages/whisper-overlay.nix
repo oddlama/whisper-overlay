@@ -1,6 +1,7 @@
 {inputs, ...}: {
   perSystem = {
     config,
+    lib,
     pkgs,
     ...
   }: let
@@ -39,6 +40,14 @@
         pkgs.wrapGAppsHook4
       ];
       buildInputs = includes ++ libraries;
+
+      meta = {
+        description = "A wayland overlay providing speech-to-text functionality for any application via a global push-to-talk hotkey ";
+        homepage = "https://github.com/oddlama/whisper-overlay";
+        license = lib.licenses.mit;
+        maintainers = with lib.maintainers; [oddlama];
+        mainProgram = "whisper-overlay";
+      };
     };
 
     devshells.default = {

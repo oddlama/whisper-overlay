@@ -20,13 +20,16 @@
 in {
   options.services.realtime-stt-server = {
     enable = mkEnableOption "realtime-stt-server";
-    package = mkPackageOption pkgs "realtime-stt-server" {};
-
-    openFirewall = mkOption {
+    autoStart = mkOption {
       type = types.bool;
       default = false;
-      description = "Whether to open the relevant port for realtime-stt-server in your firewall";
+      description = ''
+        Automatically start the server when graphical-session.target is reached.
+        Not enabled by default due to high VRAM memory allocation - it is probably
+        better to start and stop this service on demand.
+      '';
     };
+    package = mkPackageOption pkgs "realtime-stt-server" {};
 
     host = mkOption {
       type = types.str;
@@ -67,14 +70,13 @@ in {
   };
 
   config = mkIf cfg.enable {
-    systemd.services.realtime-stt-server = {
-      description = "A server for RealtimeSTT made to be used with whisper-overlay";
-      wantedBy = ["multi-user.target"];
-      after = ["network.target"];
-
-      environment.HOME = "/var/lib/realtime-stt-server";
-      environment.HF_HOME = "/var/lib/realtime-stt-server";
-      serviceConfig = {
+    systemd.user.services.realtime-stt-server = {
+      Install.WantedBy = mkIf cfg.autoStart ["graphical-session.target"];
+      Unit = {
+        Description = "A server for RealtimeSTT made to be used with whisper-overlay";
+        PartOf = mkIf cfg.autoStart ["graphical-session.target"];
+      };
+      Service = {
         Restart = "on-failure";
         ExecStart =
           "${getExe cfg.package} "
@@ -85,26 +87,21 @@ in {
             ++ optionals (cfg.language != null) ["--language" cfg.language]
             ++ cfg.extraOptions
           );
-        DynamicUser = true;
-        User = "realtime-stt-server";
-        Group = "realtime-stt-server";
-
-        WorkingDirectory = "/var/lib/realtime-stt-server";
+        Environment = [
+          "HOME=%S/realtime-stt-server"
+          "HF_HOME=%S/realtime-stt-server"
+        ];
+        WorkingDirectory = "%S/realtime-stt-server";
         StateDirectory = "realtime-stt-server";
-        StateDirectoryMode = "0750";
 
         # Hardening
-        CapabilityBoundingSet = "";
-        LockPersonality = true;
         #MemoryDenyWriteExecute = true;
-        NoNewPrivileges = true;
-        PrivateUsers = true;
-        PrivateTmp = true;
+        #PrivateTmp = true;     # Can't use as user service
         #PrivateDevices = true; # Needs CUDA
-        PrivateMounts = true;
+        #PrivateMounts = true;  # Can't use as user service
         ProtectClock = true;
         ProtectControlGroups = true;
-        ProtectHome = true;
+        #ProtectHome = true;    # We need our home
         ProtectHostname = true;
         ProtectKernelLogs = true;
         ProtectKernelModules = true;
@@ -128,7 +125,5 @@ in {
         UMask = "0077";
       };
     };
-
-    networking.firewall.allowedTCPPorts = mkIf cfg.openFirewall [7007];
   };
 }

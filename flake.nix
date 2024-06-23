@@ -35,6 +35,11 @@
           imports = [./nix/nixosModules/realtime-stt-server.nix];
           nixpkgs.overlays = [config.overlays.default];
         };
+
+        homeManagerModules.default = {
+          imports = [./nix/homeManagerModules/realtime-stt-server.nix];
+          nixpkgs.overlays = [config.overlays.default];
+        };
       };
 
       perSystem = {system, ...}: {

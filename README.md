@@ -127,8 +127,12 @@ whisper-overlay overlay
 ### ❄️ NixOS
 </summary>
 
-This application comes with a NixOS module and overlay so you can easily access the relevant packages
-and host the realtime-stt-server. First, add this flake as an input:
+This application comes with both a NixOS module and a Home Manager module.
+If you just want the packages, there's also an overlay available which is automatically
+added by the two modules. If you want to run the service at all times, use the NixOS module (e.g. if running on a network host).
+If you want to be able to start and stop the service as your user, use the home manager module.
+
+In any case, add this flake as an input:
 
 ```nix
 {
@@ -140,11 +144,44 @@ and host the realtime-stt-server. First, add this flake as an input:
 }
 ```
 
-Then add the nixos module exposed by this flake,
-and enable the realtime-stt-server in your `configuration.nix`. Also add the relevant package to your system or user,
-so you can start it later.
+#### Home Manager service
+
+Import the HomeManager module exposed by this flake to your configuration,
+and set `services.realtime-stt-server.enable` in your user configuration.
 
 ```nix
+# This is a home-manager config module
+{
+  imports = [
+    inputs.whisper-overlay.homeManagerModules.default
+  ];
+
+  # Also make sure to enable cuda support in nixpkgs, otherwise transcription will
+  # be painfully slow. But be prepared to let your computer build packages for 2-3 hours.
+  nixpkgs.config.cudaSupport = true;
+
+  # Enable the user service
+  services.realtime-stt-server.enable = true;
+  # If you want to automatically start the service with your graphical session,
+  # enable this too. If you want to start and stop the service on demand to save
+  # resources, don't enable this and use `systemctl --user <start|stop> realtime-stt-server`.
+  services.realtime-stt-server.autoStart = true;
+
+  # Add the whisper-overlay package so you can start it manually.
+  # Alternatively add it to the autostart of your display environment or window manager.
+  home.packages = [pkgs.whisper-overlay];
+}
+```
+
+#### NixOS service
+
+Import the NixOS module exposed by this flake to your configuration,
+and set `services.realtime-stt-server.enable`.
+You can also add the whisper-overlay package to your system or user,
+so you can start it with your desktop environment or window manager.
+
+```nix
+# This is a NixOS config module
 {
   imports = [
     inputs.whisper-overlay.nixosModules.default
@@ -154,14 +191,16 @@ so you can start it later.
   # be painfully slow. But be prepared to let your computer build packages for 2-3 hours.
   nixpkgs.config.cudaSupport = true;
 
+  # Start the service and expose the port to your local network.
   services.realtime-stt-server.enable = true;
+  services.realtime-stt-server.openFirewall = true;
+
+  # If you are running this system-wide on your local machine,
+  # Add the whisper-overlay package so you can start the overlayit manually.
+  # Alternatively add it to the autostart of your display environment or window manager.
   environment.systemPackages = [pkgs.whisper-overlay];
 }
 ```
-
-The server will now be started automatically with your system,
-and you can run `whisper-overlay overlay` as your user.
-You might want to add this.
 
 </details>
 <details>

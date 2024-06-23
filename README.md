@@ -1,4 +1,8 @@
-[Installation and Usage](#-installation-and-usage)
+[Quick Start](#-quick-start) \| [Installation](#-installation) \| [Usage](#-usage) \| [Limitations](#-limitations)
+
+https://github.com/oddlama/whisper-overlay/assets/31919558/5670df1f-ec46-44f3-ba85-23a7e8d3fd55
+
+[![Crate](https://img.shields.io/crates/v/embedded-devices.svg)](https://crates.io/crates/embedded-devices)
 
 ## 💬 whisper-overlay
 
@@ -25,13 +29,13 @@ Requirements:
 
 ## 🚀 Quick Start
 
-- Clone the repository
+- Clone and enter the repository
   ```
   git clone https://github.com/oddlama/whisper-overlay
   cd whisper-overlay
   ```
 
-- Run the realtime-stt-server using docker
+- Start the realtime-stt-server using docker
   ```
   docker-compose up
   ```
@@ -98,7 +102,7 @@ Options:
 <details>
 <summary>
 
-### ❄️ 🐳 Docker & cargo
+### 🐳 Docker & cargo
 </summary>
 
 For a quick and simple install, you can run the server using docker and

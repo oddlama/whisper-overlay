@@ -10,7 +10,7 @@ A wayland overlay providing speech-to-text functionality for any application via
 Anything you are saying while holding the hotkey will be transcribed in real-time and shown on-screen.
 The live transcriptions use a faster but less accurate model but as soon as you pause speaking or release
 the hotkey, the transcription will be updated using a second, more accurate model.
-This resulting text will then be tryped into the window that is currently focused.
+This resulting text will then be typed into the window that is currently focused.
 
 - On-screen, realtime live transcriptions via CUDA and faster-whisper
 - The server-client based architecture allows you to host the model on another machine
